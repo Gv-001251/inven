@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { HiOutlineRefresh, HiOutlinePlus, HiOutlineTruck, HiOutlineCheckCircle } from 'react-icons/hi';
+import {
+  HiOutlineRefresh,
+  HiOutlinePlus,
+  HiOutlineTruck,
+  HiOutlineCheckCircle,
+  HiOutlineSearch,
+  HiOutlineDownload,
+  HiOutlineFilter,
+  HiOutlineX,
+  HiOutlineDotsVertical
+} from 'react-icons/hi';
 import { FaBarcode } from 'react-icons/fa';
 
 const FinishedProducts = () => {
+  // --- State Management ---
   const [products, setProducts] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [stats, setStats] = useState({
@@ -13,6 +24,8 @@ const FinishedProducts = () => {
     categories: 0
   });
   const [loading, setLoading] = useState(true);
+
+  // Modal State
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [actionType, setActionType] = useState('MANUFACTURED');
@@ -21,10 +34,12 @@ const FinishedProducts = () => {
     reason: '',
     userName: localStorage.getItem('userName') || 'Supervisor'
   });
+
+  // Filter State
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('All');
 
-  // Barcode scanning states
+  // Barcode Scanning State
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [barcodeInput, setBarcodeInput] = useState('');
   const [scanError, setScanError] = useState('');
@@ -42,8 +57,9 @@ const FinishedProducts = () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const config = { headers: { 'Authorization': `Bearer ${token}` } };
+      const config = { headers: { 'Authorization': `Bearer ${token}` } }; // Ensure token is used if auth is required
 
+      // Adjust URLs if needed to match your backend environment usually localhost:5001 or equivalent
       const [productsRes, transactionsRes] = await Promise.all([
         axios.get('http://localhost:5001/api/finished-products', config),
         axios.get('http://localhost:5001/api/finished-products/transactions', config)
@@ -59,11 +75,13 @@ const FinishedProducts = () => {
       }
     } catch (error) {
       console.error('Error fetching data:', error);
+      // Fallback for demo/dev if API fails
     } finally {
       setLoading(false);
     }
   };
 
+  // --- Handlers ---
   const handleOpenModal = (product, action) => {
     setSelectedProduct(product);
     setActionType(action);
@@ -77,12 +95,10 @@ const FinishedProducts = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
     if (!formData.quantity || formData.quantity <= 0) {
       alert('Please enter a valid quantity');
       return;
     }
-
     if (actionType === 'DISPATCHED' && formData.quantity > selectedProduct.stock) {
       alert('Cannot dispatch more than available stock!');
       return;
@@ -111,11 +127,28 @@ const FinishedProducts = () => {
       }
     } catch (error) {
       console.error('Error updating stock:', error);
-      alert('Failed to update stock: ' + error.message);
+      alert('Failed to update stock: ' + (error.response?.data?.message || error.message));
     }
   };
 
-  // Barcode scanning functions
+  const handleExport = (data, filename) => {
+    // Simple CSV export logic
+    if (!data || data.length === 0) return;
+    const headers = Object.keys(data[0]);
+    const csv = [
+      headers.join(','),
+      ...data.map(row => headers.map(fieldName => JSON.stringify(row[fieldName], (key, value) => value === null ? '' : value)).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+  };
+
+  // --- Barcode Logic ---
   const handleBarcodeScan = async () => {
     setScanError('');
     setScanSuccess('');
@@ -130,7 +163,6 @@ const FinishedProducts = () => {
       const token = localStorage.getItem('token');
       const config = { headers: { 'Authorization': `Bearer ${token}` } };
 
-      // Search for product by barcode
       const response = await axios.get(
         `http://localhost:5001/api/finished-products?barcode=${encodeURIComponent(barcodeInput.trim())}`,
         config
@@ -145,13 +177,11 @@ const FinishedProducts = () => {
       }
     } catch (error) {
       setScanError('❌ Error scanning barcode. Please try again.');
-      console.error('Barcode scan error:', error);
     }
   };
 
   const handleBarcodeSubmit = async () => {
     if (!scannedProduct) return;
-
     setScanError('');
     setScanSuccess('');
 
@@ -159,7 +189,6 @@ const FinishedProducts = () => {
       setScanError('Please enter a valid quantity');
       return;
     }
-
     if (scanAction === 'DISPATCHED' && scanQuantity > scannedProduct.stock) {
       setScanError('Cannot dispatch more than available stock!');
       return;
@@ -183,775 +212,396 @@ const FinishedProducts = () => {
 
       if (response.data.success) {
         setScanSuccess(`✓ ${scanAction} successfully! New stock: ${response.data.newStock}`);
-        
-        // Reset form
         setBarcodeInput('');
         setScanQuantity(1);
         setScanReason('');
         setScannedProduct(null);
-        
-        // Refresh data
         fetchAllData();
-
-        // Auto-clear success message after 3 seconds
-        setTimeout(() => {
-          setScanSuccess('');
-        }, 3000);
+        setTimeout(() => setScanSuccess(''), 3000);
       }
     } catch (error) {
-      setScanError('Error processing transaction. Please try again.');
-      console.error('Transaction error:', error);
+      setScanError('Error processing transaction.');
     }
   };
 
+  // --- Filtering ---
   const categories = ['All', ...new Set(products.map(p => p.category))];
-  
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (product.barcode && product.barcode.toLowerCase().includes(searchTerm.toLowerCase()));
+      (product.barcode && product.barcode.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesCategory = filterCategory === 'All' || product.category === filterCategory;
     return matchesSearch && matchesCategory;
   });
 
-  const getActionColor = (action) => {
-    switch(action) {
-      case 'MANUFACTURED': return '#10b981';
-      case 'DISPATCHED': return '#3b82f6';
-      case 'RETURNED': return '#f59e0b';
-      case 'DAMAGED': return '#ef4444';
-      default: return '#6b7280';
+  // --- UI Helpers ---
+  const getActionColorDetails = (action) => {
+    switch (action) {
+      case 'MANUFACTURED': return { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'In Stock' };
+      case 'DISPATCHED': return { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Sold' };
+      case 'RETURNED': return { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Returned' };
+      case 'DAMAGED': return { bg: 'bg-red-100', text: 'text-red-700', label: 'Damaged' };
+      default: return { bg: 'bg-gray-100', text: 'text-gray-700', label: action };
     }
   };
 
-  const styles = {
-    container: {
-      padding: '1.5rem',
-      background: '#f8f9fa',
-      minHeight: '100vh',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-    },
-    header: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '1.5rem',
-      flexWrap: 'wrap',
-      gap: '1rem'
-    },
-    title: {
-      fontSize: '2rem',
-      fontWeight: '700',
-      color: '#1a1a1a',
-      margin: 0
-    },
-    subtitle: {
-      fontSize: '0.95rem',
-      color: '#666',
-      marginTop: '0.25rem'
-    },
-    buttonGroup: {
-      display: 'flex',
-      gap: '0.75rem',
-      flexWrap: 'wrap'
-    },
-    refreshBtn: {
-      padding: '10px 20px',
-      background: 'linear-gradient(135deg, #0d9488, #14b8a6)',
-      color: 'white',
-      border: 'none',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      fontWeight: '500',
-      fontSize: '0.9rem',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      transition: 'all 0.3s ease'
-    },
-    barcodeBtn: {
-      padding: '10px 20px',
-      background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)',
-      color: 'white',
-      border: 'none',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      fontWeight: '500',
-      fontSize: '0.9rem',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      transition: 'all 0.3s ease'
-    },
-    statsGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-      gap: '1rem',
-      marginBottom: '1.5rem'
-    },
-    statCard: (bgColor) => ({
-      background: bgColor,
-      padding: '1.25rem',
-      borderRadius: '12px',
-      color: 'white',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-    }),
-    statLabel: {
-      fontSize: '0.75rem',
-      opacity: 0.9,
-      marginBottom: '0.5rem',
-      letterSpacing: '0.5px'
-    },
-    statValue: {
-      fontSize: '2rem',
-      fontWeight: '700',
-      marginBottom: '0.25rem'
-    },
-    statSubtitle: {
-      fontSize: '0.8rem',
-      opacity: 0.85
-    },
-    card: {
-      background: 'white',
-      borderRadius: '12px',
-      padding: '1.5rem',
-      boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
-      marginBottom: '1.5rem'
-    },
-    scannerCard: {
-      background: 'white',
-      borderRadius: '12px',
-      padding: '1.5rem',
-      boxShadow: '0 4px 12px rgba(139, 92, 246, 0.15)',
-      marginBottom: '1.5rem',
-      border: '2px solid #e9d5ff'
-    },
-    cardHeader: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '1rem'
-    },
-    cardTitle: {
-      fontSize: '1.1rem',
-      fontWeight: '600',
-      color: '#1a1a1a',
-      margin: 0,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem'
-    },
-    filterSection: {
-      display: 'flex',
-      gap: '1rem',
-      marginBottom: '1rem',
-      flexWrap: 'wrap'
-    },
-    searchInput: {
-      flex: 1,
-      minWidth: '250px',
-      padding: '10px 15px',
-      border: '1px solid #e0e0e0',
-      borderRadius: '8px',
-      fontSize: '0.9rem'
-    },
-    select: {
-      padding: '10px 15px',
-      border: '1px solid #e0e0e0',
-      borderRadius: '8px',
-      fontSize: '0.9rem',
-      background: 'white',
-      cursor: 'pointer'
-    },
-    barcodeInputGroup: {
-      display: 'flex',
-      gap: '0.75rem',
-      marginBottom: '1rem'
-    },
-    barcodeInput: {
-      flex: 1,
-      padding: '12px 15px',
-      border: '2px solid #e9d5ff',
-      borderRadius: '8px',
-      fontSize: '1rem',
-      fontFamily: 'monospace',
-      fontWeight: '600',
-      textTransform: 'uppercase'
-    },
-    scanBtn: {
-      padding: '12px 24px',
-      background: 'linear-gradient(135deg, #8b5cf6, #7c3aed)',
-      color: 'white',
-      border: 'none',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      fontWeight: '500',
-      fontSize: '0.95rem',
-      transition: 'all 0.3s ease'
-    },
-    alertBox: (type) => ({
-      padding: '12px 16px',
-      borderRadius: '8px',
-      marginBottom: '1rem',
-      border: `2px solid ${type === 'error' ? '#fecaca' : '#bbf7d0'}`,
-      background: type === 'error' ? '#fee2e2' : '#dcfce7',
-      color: type === 'error' ? '#dc2626' : '#16a34a',
-      fontWeight: '500',
-      fontSize: '0.9rem'
-    }),
-    scannedProductBox: {
-      background: '#f9fafb',
-      border: '2px solid #e5e7eb',
-      borderRadius: '8px',
-      padding: '1rem',
-      marginBottom: '1rem'
-    },
-    productInfo: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-      gap: '1rem',
-      marginBottom: '1rem'
-    },
-    infoItem: {
-      fontSize: '0.85rem'
-    },
-    infoLabel: {
-      color: '#6b7280',
-      marginBottom: '0.25rem',
-      fontSize: '0.75rem',
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px'
-    },
-    infoValue: {
-      fontWeight: '700',
-      color: '#1f2937',
-      fontSize: '1rem'
-    },
-    actionGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-      gap: '1rem',
-      marginBottom: '1rem'
-    },
-    table: {
-      width: '100%',
-      borderCollapse: 'collapse',
-      fontSize: '0.85rem'
-    },
-    th: {
-      background: '#f8f9fa',
-      padding: '0.75rem',
-      textAlign: 'left',
-      fontWeight: '600',
-      color: '#495057',
-      borderBottom: '2px solid #e9ecef',
-      fontSize: '0.75rem',
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px'
-    },
-    td: {
-      padding: '0.75rem',
-      borderBottom: '1px solid #f0f0f0'
-    },
-    actionBtn: (bgColor, disabled = false) => ({
-      padding: '6px 12px',
-      background: disabled ? '#e9ecef' : bgColor,
-      color: disabled ? '#6c757d' : 'white',
-      border: 'none',
-      borderRadius: '6px',
-      cursor: disabled ? 'not-allowed' : 'pointer',
-      fontSize: '0.75rem',
-      fontWeight: '500',
-      marginRight: '0.5rem',
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '0.25rem',
-      opacity: disabled ? 0.6 : 1
-    }),
-    badge: (bgColor) => ({
-      display: 'inline-block',
-      padding: '4px 10px',
-      borderRadius: '12px',
-      fontSize: '0.75rem',
-      fontWeight: '600',
-      background: bgColor,
-      color: 'white'
-    }),
-    modal: {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0,0,0,0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000
-    },
-    modalContent: {
-      background: 'white',
-      borderRadius: '12px',
-      padding: '2rem',
-      width: '90%',
-      maxWidth: '500px',
-      boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
-    },
-    modalTitle: {
-      fontSize: '1.5rem',
-      fontWeight: '600',
-      marginBottom: '1rem',
-      color: '#1a1a1a'
-    },
-    formGroup: {
-      marginBottom: '1rem'
-    },
-    label: {
-      display: 'block',
-      fontSize: '0.85rem',
-      fontWeight: '500',
-      marginBottom: '0.5rem',
-      color: '#495057'
-    },
-    input: {
-      width: '100%',
-      padding: '10px',
-      border: '1px solid #e0e0e0',
-      borderRadius: '6px',
-      fontSize: '0.9rem',
-      boxSizing: 'border-box'
-    },
-    textarea: {
-      width: '100%',
-      padding: '10px',
-      border: '1px solid #e0e0e0',
-      borderRadius: '6px',
-      fontSize: '0.9rem',
-      minHeight: '80px',
-      boxSizing: 'border-box',
-      resize: 'vertical'
-    },
-    modalActions: {
-      display: 'flex',
-      gap: '1rem',
-      marginTop: '1.5rem'
-    },
-    submitBtn: (bgColor) => ({
-      flex: 1,
-      padding: '12px',
-      background: bgColor || 'linear-gradient(135deg, #0d9488, #14b8a6)',
-      color: 'white',
-      border: 'none',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      fontWeight: '500',
-      fontSize: '0.95rem',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '0.5rem',
-      transition: 'all 0.3s ease'
-    }),
-    cancelBtn: {
-      flex: 1,
-      padding: '12px',
-      background: '#e9ecef',
-      color: '#495057',
-      border: 'none',
-      borderRadius: '8px',
-      cursor: 'pointer',
-      fontWeight: '500',
-      fontSize: '0.95rem'
-    }
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-mint">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
+    <div className="min-h-screen bg-mint p-8">
+      {/* Page Header */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-4">
         <div>
-          <h1 style={styles.title}>🏭 Finished Products Management</h1>
-          <p style={styles.subtitle}>Manage manufactured products and dispatch operations</p>
+          <h1 className="text-3xl font-extrabold text-primary">Finished Products</h1>
+          <p className="text-secondary text-sm mt-1">Manage manufactured inventory and dispatches.</p>
         </div>
-        <div style={styles.buttonGroup}>
-          <button 
-            style={styles.barcodeBtn} 
-            onClick={() => setShowBarcodeScanner(!showBarcodeScanner)}
+
+        {/* Actions */}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => handleExport(products, 'finished-products.csv')}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-primary text-primary rounded-lg text-sm font-semibold hover:bg-primary/5 transition-colors"
           >
-            <FaBarcode size={18} />
-            {showBarcodeScanner ? 'Hide Scanner' : 'Barcode Scanner'}
+            <HiOutlineDownload className="text-lg" /> Export
           </button>
-          <button style={styles.refreshBtn} onClick={fetchAllData}>
-            <HiOutlineRefresh size={18} />
-            Refresh
+
+          <button
+            onClick={() => setShowBarcodeScanner(!showBarcodeScanner)}
+            className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-semibold transition-colors 
+                    ${showBarcodeScanner ? 'bg-primary text-white border-primary' : 'bg-white border-primary text-primary hover:bg-primary/5'}`}
+          >
+            <FaBarcode /> {showBarcodeScanner ? 'Close Scanner' : 'Bar Code Scanner'}
           </button>
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div style={styles.statsGrid}>
-        <div style={styles.statCard('linear-gradient(135deg, #10b981, #059669)')}>
-          <div style={styles.statLabel}>TOTAL STOCK</div>
-          <div style={styles.statValue}>{stats.totalStock}</div>
-          <div style={styles.statSubtitle}>units available</div>
-        </div>
-        <div style={styles.statCard('linear-gradient(135deg, #3b82f6, #2563eb)')}>
-          <div style={styles.statLabel}>PRODUCT TYPES</div>
-          <div style={styles.statValue}>{stats.totalProducts}</div>
-          <div style={styles.statSubtitle}>varieties</div>
-        </div>
-        <div style={styles.statCard('linear-gradient(135deg, #8b5cf6, #7c3aed)')}>
-          <div style={styles.statLabel}>CATEGORIES</div>
-          <div style={styles.statValue}>{stats.categories}</div>
-          <div style={styles.statSubtitle}>product lines</div>
-        </div>
-        <div style={styles.statCard(stats.lowStockCount > 0 ? 'linear-gradient(135deg, #ef4444, #dc2626)' : 'linear-gradient(135deg, #6b7280, #4b5563)')}>
-          <div style={styles.statLabel}>LOW STOCK</div>
-          <div style={styles.statValue}>{stats.lowStockCount}</div>
-          <div style={styles.statSubtitle}>need production</div>
-        </div>
-      </div>
-
-      {/* Barcode Scanner Section */}
+      {/* Barcode Scanner Section (Collapsible) */}
       {showBarcodeScanner && (
-        <div style={styles.scannerCard}>
-          <h3 style={styles.cardTitle}>
-            <FaBarcode size={20} style={{color: '#8b5cf6'}} />
-            Quick Stock Update - Barcode Scanner
-          </h3>
-          
-          <div style={styles.barcodeInputGroup}>
+        <div className="bg-white rounded-2xl shadow-sm border border-primary/5 p-6 mb-8 animate-fade-in-down">
+          <h2 className="text-lg font-bold text-primary mb-4 flex items-center gap-2">
+            <FaBarcode /> Quick Stock Update
+          </h2>
+          <div className="flex gap-4 mb-4">
             <input
-              type="text"
+              autoFocus
               value={barcodeInput}
               onChange={(e) => setBarcodeInput(e.target.value.toUpperCase())}
               onKeyPress={(e) => e.key === 'Enter' && handleBarcodeScan()}
-              placeholder="Scan or type barcode (e.g., FP-SC-007)"
-              style={styles.barcodeInput}
-              autoFocus
+              placeholder="Scan barcode or type here..."
+              className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
-            <button onClick={handleBarcodeScan} style={styles.scanBtn}>
+            <button onClick={handleBarcodeScan} className="px-6 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary-light transition-colors">
               Scan
             </button>
           </div>
 
-          {scanError && (
-            <div style={styles.alertBox('error')}>
-              {scanError}
-            </div>
-          )}
+          {/* Feedback Messages */}
+          {scanError && <div className="p-3 bg-red-50 text-red-600 rounded-lg text-sm font-medium mb-4">{scanError}</div>}
+          {scanSuccess && <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg text-sm font-medium mb-4">{scanSuccess}</div>}
 
-          {scanSuccess && (
-            <div style={styles.alertBox('success')}>
-              {scanSuccess}
-            </div>
-          )}
-
+          {/* Scanned Product Actions */}
           {scannedProduct && (
-            <div style={styles.scannedProductBox}>
-              <div style={styles.productInfo}>
-                <div style={styles.infoItem}>
-                  <div style={styles.infoLabel}>Product Name</div>
-                  <div style={styles.infoValue}>{scannedProduct.product_name}</div>
+            <div className="mt-6 p-6 bg-mint/30 rounded-xl border border-primary/10">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div>
+                  <span className="text-xs text-gray-500 uppercase font-bold">Product</span>
+                  <div className="font-bold text-primary">{scannedProduct.product_name}</div>
                 </div>
-                <div style={styles.infoItem}>
-                  <div style={styles.infoLabel}>Category</div>
-                  <div style={styles.infoValue}>{scannedProduct.category}</div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase font-bold">Stock</span>
+                  <div className="font-bold text-primary">{scannedProduct.stock} units</div>
                 </div>
-                <div style={styles.infoItem}>
-                  <div style={styles.infoLabel}>Current Stock</div>
-                  <div style={styles.infoValue}>{scannedProduct.stock} units</div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase font-bold">Category</span>
+                  <div className="font-bold text-gray-700">{scannedProduct.category}</div>
                 </div>
-                <div style={styles.infoItem}>
-                  <div style={styles.infoLabel}>Barcode</div>
-                  <div style={{...styles.infoValue, color: '#8b5cf6'}}>{scannedProduct.barcode}</div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase font-bold">Barcode</span>
+                  <div className="font-mono text-primary">{scannedProduct.barcode}</div>
                 </div>
               </div>
 
-              <div style={styles.actionGrid}>
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Action</label>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                <div className="md:col-span-4">
+                  <label className="block text-xs font-bold text-gray-500 mb-1">Action</label>
                   <select
                     value={scanAction}
                     onChange={(e) => setScanAction(e.target.value)}
-                    style={styles.select}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:border-primary"
                   >
                     <option value="MANUFACTURED">Stock In (Manufacturing)</option>
-                    <option value="DISPATCHED">Dispatch (Customer Order)</option>
+                    <option value="DISPATCHED">Dispatch (Order)</option>
                   </select>
                 </div>
-
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Quantity</label>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-gray-500 mb-1">Qty</label>
                   <input
                     type="number"
                     min="1"
-                    max={scanAction === 'DISPATCHED' ? scannedProduct.stock : undefined}
                     value={scanQuantity}
                     onChange={(e) => setScanQuantity(e.target.value)}
-                    style={styles.input}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:border-primary text-center font-bold"
                   />
                 </div>
+                <div className="md:col-span-4">
+                  <label className="block text-xs font-bold text-gray-500 mb-1">Reason</label>
+                  <input
+                    type="text"
+                    value={scanReason}
+                    onChange={(e) => setScanReason(e.target.value)}
+                    placeholder="Order #..."
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:border-primary"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <button
+                    onClick={handleBarcodeSubmit}
+                    className="w-full py-2 bg-emerald-custon bg-primary text-white font-bold rounded-lg hover:brightness-110"
+                  >
+                    Confirm
+                  </button>
+                </div>
               </div>
-
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Reason (Optional)</label>
-                <input
-                  type="text"
-                  value={scanReason}
-                  onChange={(e) => setScanReason(e.target.value)}
-                  placeholder="e.g., Order #1234, Bulk manufacturing"
-                  style={styles.input}
-                />
-              </div>
-
-              <button
-                onClick={handleBarcodeSubmit}
-                style={styles.submitBtn(
-                  scanAction === 'MANUFACTURED' 
-                    ? 'linear-gradient(135deg, #10b981, #059669)' 
-                    : 'linear-gradient(135deg, #3b82f6, #2563eb)'
-                )}
-              >
-                {scanAction === 'MANUFACTURED' ? (
-                  <>
-                    <HiOutlinePlus size={18} />
-                    Add {scanQuantity} Unit(s) to Stock
-                  </>
-                ) : (
-                  <>
-                    <HiOutlineTruck size={18} />
-                    Dispatch {scanQuantity} Unit(s)
-                  </>
-                )}
-              </button>
             </div>
           )}
         </div>
       )}
 
-      {/* Products Table */}
-      <div style={styles.card}>
-        <div style={styles.cardHeader}>
-          <h3 style={styles.cardTitle}>All Finished Products</h3>
-        </div>
+      {/* Main Content Grid */}
+      <div className="flex flex-col gap-8">
 
-        <div style={styles.filterSection}>
-          <input
-            type="text"
-            placeholder="🔍 Search products or barcodes..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={styles.searchInput}
-          />
-          <select
-            value={filterCategory}
-            onChange={(e) => setFilterCategory(e.target.value)}
-            style={styles.select}
-          >
-            {categories.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-        </div>
+        {/* Section 1: All Finished Products */}
+        <div>
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
+            <h2 className="text-xl font-bold text-primary">All Finished Products</h2>
 
-        <div style={{overflowX: 'auto'}}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Product Name</th>
-                <th style={styles.th}>Category</th>
-                <th style={styles.th}>Specification</th>
-                <th style={{...styles.th, textAlign: 'center'}}>Stock</th>
-                <th style={{...styles.th, textAlign: 'center'}}>Status</th>
-                <th style={{...styles.th, textAlign: 'center'}}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="6" style={{...styles.td, textAlign: 'center', padding: '2rem'}}>
-                    Loading products...
-                  </td>
-                </tr>
-              ) : filteredProducts.length === 0 ? (
-                <tr>
-                  <td colSpan="6" style={{...styles.td, textAlign: 'center', padding: '2rem', color: '#666'}}>
-                    No products found
-                  </td>
-                </tr>
-              ) : (
-                filteredProducts.map((product) => (
-                  <tr key={product.id}>
-                    <td style={styles.td}>
-                      <strong style={{display: 'block', marginBottom: '2px'}}>{product.product_name}</strong>
-                      <div style={{fontSize: '0.75rem', color: '#8b5cf6', fontFamily: 'monospace', fontWeight: '600'}}>
-                        {product.barcode}
-                      </div>
-                    </td>
-                    <td style={styles.td}>{product.category}</td>
-                    <td style={styles.td}>{product.specification}</td>
-                    <td style={{...styles.td, textAlign: 'center'}}>
-                      <span style={{
-                        fontSize: '1.1rem',
-                        fontWeight: '700',
-                        color: product.stock > 0 ? '#10b981' : '#dc3545'
-                      }}>
-                        {product.stock}
-                      </span>
-                    </td>
-                    <td style={{...styles.td, textAlign: 'center'}}>
-                      {product.stock > product.min_stock ? (
-                        <span style={styles.badge('#10b981')}>✓ Ready</span>
-                      ) : product.stock > 0 ? (
-                        <span style={styles.badge('#f59e0b')}>⚠ Low</span>
-                      ) : (
-                        <span style={styles.badge('#dc3545')}>✗ Empty</span>
-                      )}
-                    </td>
-                    <td style={{...styles.td, textAlign: 'center'}}>
-                      <button
-                        style={styles.actionBtn('#10b981')}
-                        onClick={() => handleOpenModal(product, 'MANUFACTURED')}
-                      >
-                        <HiOutlinePlus size={14} />
-                        Add Stock
-                      </button>
-                      <button
-                        style={styles.actionBtn('#3b82f6', product.stock === 0)}
-                        onClick={() => handleOpenModal(product, 'DISPATCHED')}
-                        disabled={product.stock === 0}
-                      >
-                        <HiOutlineTruck size={14} />
-                        Dispatch
-                      </button>
-                    </td>
+            {/* Search & Filter */}
+            <div className="flex items-center gap-3">
+              <div className="relative w-full md:w-64">
+                <HiOutlineSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-white border border-primary/20 rounded-lg text-sm focus:outline-none focus:border-primary"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-primary/5">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-primary text-white text-xs uppercase tracking-wider">
+                    <th className="p-4 font-semibold w-12 text-center rounded-tl-lg">
+                      <div className="w-4 h-4 border-2 border-white/50 rounded mx-auto"></div>
+                    </th>
+                    <th className="p-4 font-semibold">ID</th>
+                    <th className="p-4 font-semibold">Product Name</th>
+                    <th className="p-4 font-semibold">Category</th>
+                    <th className="p-4 font-semibold text-center">Specification</th>
+                    <th className="p-4 font-semibold text-center">Stock Status</th>
+                    <th className="p-4 font-semibold text-center rounded-tr-lg">Actions</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="text-sm text-gray-600">
+                  {filteredProducts.length === 0 ? (
+                    <tr><td colSpan="7" className="p-8 text-center text-gray-400">No products found.</td></tr>
+                  ) : (
+                    filteredProducts.map((product, idx) => (
+                      <tr key={product.id} className={`border-b border-gray-50 last:border-0 hover:bg-emerald-50/30 transition-colors ${idx % 2 === 0 ? 'bg-mint/20' : 'bg-white'}`}>
+                        <td className="p-4 text-center">
+                          <div className="w-4 h-4 border-2 border-gray-300 rounded mx-auto cursor-pointer"></div>
+                        </td>
+                        <td className="p-4 font-mono text-xs text-emerald-800/60">
+                          COMP-{String(product.id || idx + 1).padStart(3, '0')}
+                        </td>
+                        <td className="p-4 font-semibold text-primary">{product.product_name}</td>
+                        <td className="p-4 text-gray-500">{product.category}</td>
+                        <td className="p-4 text-center font-mono text-xs">{product.specification || '30'}</td>
+                        <td className="p-4 text-center">
+                          <span className={`font-bold ${product.stock > 0 ? 'text-primary' : 'text-red-500'}`}>
+                            ${product.stock}
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          {/* Functionality: using the buttons to open Modal */}
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleOpenModal(product, 'MANUFACTURED')}
+                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded"
+                              title="Add Stock"
+                            >
+                              <HiOutlinePlus />
+                            </button>
+                            <button
+                              onClick={() => handleOpenModal(product, 'DISPATCHED')}
+                              disabled={product.stock <= 0}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                              title="Dispatch"
+                            >
+                              <HiOutlineTruck />
+                            </button>
+                            <button className="p-1.5 text-gray-400 hover:text-primary">
+                              <HiOutlineDotsVertical />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
+
+        {/* Section 2: Recent Transactions */}
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-primary">Recent Transactions</h2>
+            <button
+              onClick={() => handleExport(transactions, 'transactions.csv')}
+              className="flex items-center gap-2 text-emerald-custom font-bold text-sm hover:text-emerald-700"
+            >
+              <HiOutlineDownload /> Export
+            </button>
+          </div>
+
+          <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-primary/5">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-primary text-white text-xs uppercase tracking-wider">
+                    <th className="p-4 font-semibold w-12 text-center rounded-tl-lg">
+                      <div className="w-4 h-4 border-2 border-white/50 rounded mx-auto"></div>
+                    </th>
+                    <th className="p-4 font-semibold">ID</th>
+                    <th className="p-4 font-semibold">Date & Time</th>
+                    <th className="p-4 font-semibold">Product</th>
+                    <th className="p-4 font-semibold">Action</th>
+                    <th className="p-4 font-semibold text-center">Quantity</th>
+                    <th className="p-4 font-semibold rounded-tr-lg">User</th>
+                  </tr>
+                </thead>
+                <tbody className="text-sm text-gray-600">
+                  {transactions.length === 0 ? (
+                    <tr><td colSpan="7" className="p-8 text-center text-gray-400">No transactions recorded.</td></tr>
+                  ) : (
+                    transactions.slice(0, 10).map((txn, idx) => {
+                      const status = getActionColorDetails(txn.action);
+                      return (
+                        <tr key={idx} className={`border-b border-gray-50 last:border-0 hover:bg-emerald-50/30 transition-colors ${idx % 2 === 0 ? 'bg-mint/20' : 'bg-white'}`}>
+                          <td className="p-4 text-center">
+                            <div className="w-4 h-4 border-2 border-gray-300 rounded mx-auto cursor-pointer"></div>
+                          </td>
+                          <td className="p-4 font-mono text-xs text-emerald-800/60">
+                            COMP-{String(txn.id || idx + 1).padStart(3, '0')}
+                          </td>
+                          <td className="p-4 text-xs font-medium text-gray-500">
+                            {new Date(txn.timestamp).toLocaleString()}
+                          </td>
+                          <td className="p-4 font-medium text-primary">
+                            {txn.product_name}
+                          </td>
+                          <td className="p-4">
+                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${status.bg} ${status.text}`}>
+                              {status.label}
+                            </span>
+                          </td>
+                          <td className="p-4 text-center font-bold text-gray-700">
+                            {txn.quantity}
+                          </td>
+                          <td className="p-4 text-xs font-semibold text-gray-500 uppercase">
+                            {txn.user_name}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
       </div>
 
-      {/* Recent Transactions */}
-      <div style={styles.card}>
-        <div style={styles.cardHeader}>
-          <h3 style={styles.cardTitle}>Recent Transactions</h3>
-        </div>
-        <div style={{overflowX: 'auto'}}>
-          <table style={styles.table}>
-            <thead>
-              <tr>
-                <th style={styles.th}>Date & Time</th>
-                <th style={styles.th}>Product</th>
-                <th style={styles.th}>Action</th>
-                <th style={{...styles.th, textAlign: 'center'}}>Quantity</th>
-                <th style={styles.th}>Reason</th>
-                <th style={styles.th}>User</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.length === 0 ? (
-                <tr>
-                  <td colSpan="6" style={{...styles.td, textAlign: 'center', padding: '2rem', color: '#666'}}>
-                    No transactions yet
-                  </td>
-                </tr>
-              ) : (
-                transactions.slice(0, 20).map((txn, index) => (
-                  <tr key={index}>
-                    <td style={styles.td}>
-                      {new Date(txn.timestamp).toLocaleString()}
-                    </td>
-                    <td style={styles.td}>{txn.product_name}</td>
-                    <td style={styles.td}>
-                      <span style={{
-                        color: getActionColor(txn.action),
-                        fontWeight: '600'
-                      }}>
-                        {txn.action}
-                      </span>
-                    </td>
-                    <td style={{...styles.td, textAlign: 'center', fontWeight: '700'}}>
-                      {txn.quantity}
-                    </td>
-                    <td style={styles.td}>{txn.reason}</td>
-                    <td style={styles.td}>{txn.user_name}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Modal */}
+      {/* Manual Stock Modal */}
       {showModal && (
-        <div style={styles.modal} onClick={() => setShowModal(false)}>
-          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-            <h2 style={styles.modalTitle}>
-              {actionType === 'MANUFACTURED' ? '✅ Add Manufactured Stock' : '🚚 Dispatch Product'}
-            </h2>
-            <p style={{color: '#666', marginBottom: '1.5rem'}}>
-              <strong>{selectedProduct?.product_name}</strong><br />
-              <span style={{fontSize: '0.85rem', color: '#8b5cf6', fontFamily: 'monospace', fontWeight: '600'}}>
-                {selectedProduct?.barcode}
-              </span><br />
-              Current Stock: <strong>{selectedProduct?.stock} units</strong>
-            </p>
-            
-            <form onSubmit={handleSubmit}>
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Quantity *</label>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl transform transition-all scale-100">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-gray-900">
+                {actionType === 'MANUFACTURED' ? 'Add Stock' : 'Dispatch Product'}
+              </h3>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-red-500">
+                <HiOutlineX className="text-xl" />
+              </button>
+            </div>
+
+            <div className="bg-mint/30 p-4 rounded-xl mb-6 border border-primary/10">
+              <h4 className="font-bold text-primary">{selectedProduct?.product_name}</h4>
+              <div className="flex justify-between text-sm mt-2">
+                <span className="text-gray-500">Current Stock</span>
+                <span className="font-bold text-gray-800">{selectedProduct?.stock} units</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Quantity</label>
                 <input
                   type="number"
                   min="1"
                   max={actionType === 'DISPATCHED' ? selectedProduct?.stock : undefined}
                   value={formData.quantity}
-                  onChange={(e) => setFormData({...formData, quantity: e.target.value})}
-                  style={styles.input}
-                  placeholder="Enter quantity"
+                  onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-primary font-bold text-lg"
+                  placeholder="0"
                   required
                 />
               </div>
 
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Reason / Notes</label>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1">Reason / Notes</label>
                 <textarea
                   value={formData.reason}
-                  onChange={(e) => setFormData({...formData, reason: e.target.value})}
-                  style={styles.textarea}
-                  placeholder="Enter reason or notes (optional)"
+                  onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-primary text-sm"
+                  placeholder="Add notes..."
+                  rows="2"
                 />
               </div>
 
-              <div style={styles.formGroup}>
-                <label style={styles.label}>Your Name</label>
-                <input
-                  type="text"
-                  value={formData.userName}
-                  onChange={(e) => setFormData({...formData, userName: e.target.value})}
-                  style={styles.input}
-                  placeholder="Enter your name"
-                />
-              </div>
-
-              <div style={styles.modalActions}>
-                <button type="submit" style={styles.submitBtn()}>
-                  <HiOutlineCheckCircle size={18} />
-                  Confirm {actionType === 'MANUFACTURED' ? 'Add' : 'Dispatch'}
-                </button>
+              <div className="pt-2 flex gap-3">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  style={styles.cancelBtn}
+                  className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200"
                 >
                   Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={`flex-1 py-3 text-white font-bold rounded-xl shadow-lg 
+                            ${actionType === 'MANUFACTURED' ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'}`}
+                >
+                  Confirm
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
     </div>
   );
 };

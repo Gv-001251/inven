@@ -8,146 +8,79 @@ import {
   HiOutlineBell,
   HiOutlineCog,
   HiOutlineDocumentText,
-  HiOutlineCube
+  HiOutlineCube,
+  HiOutlineLogout,
+  HiOutlineQuestionMarkCircle
 } from 'react-icons/hi';
-
 import { useAuth } from '../context/AuthContext';
 
 const Sidebar = () => {
   const location = useLocation();
-  const { hasPermission } = useAuth();
+  const { hasPermission, logout } = useAuth();
 
   const menuItems = [
-    { path: '/dashboard', icon: HiOutlineHome, label: 'Dashboard' }, // Always visible
+    { path: '/dashboard', icon: HiOutlineHome, label: 'Dashboard' },
     { path: '/inventory', icon: HiOutlineClipboardList, label: 'Inventory', permission: 'viewInventory' },
     { path: '/finished-products', icon: HiOutlineCube, label: 'Finished Products', permission: 'viewFinishedProducts' },
     { path: '/attendance', icon: HiOutlineUsers, label: 'Attendance', permission: 'viewAttendance' },
-    { path: '/purchase', icon: HiOutlineShoppingCart, label: 'Purchase', permission: 'createPurchaseRequest' },
     { path: '/invoice', icon: HiOutlineDocumentText, label: 'Invoice', permission: 'viewInvoices' },
-    { path: '/notifications', icon: HiOutlineBell, label: 'Notifications', permission: 'viewNotifications' },
+    { path: '/purchase', icon: HiOutlineShoppingCart, label: 'Purchase', permission: 'createPurchaseRequest' },
+    { path: '/notifications', icon: HiOutlineBell, label: 'Notification', permission: 'viewNotifications' },
     { path: '/settings', icon: HiOutlineCog, label: 'Settings', permission: 'manageRoles' }
   ].filter(item => !item.permission || hasPermission(item.permission));
 
-  const isActive = (path) => location.pathname === path;
-
-  const styles = {
-    sidebar: {
-      width: '260px',
-      background: '#fff',
-      borderRight: '1px solid #e5e7eb',
-      height: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      position: 'fixed',
-      left: 0,
-      top: 0,
-      zIndex: 100
-    },
-    logo: {
-      padding: '20px',
-      borderBottom: '1px solid #e5e7eb',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px'
-    },
-    logoIcon: {
-      width: '40px',
-      height: '40px',
-      borderRadius: '10px',
-      background: 'linear-gradient(135deg, #0d9488, #14b8a6)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: 'white',
-      fontSize: '20px',
-      fontWeight: '700'
-    },
-    logoText: {
-      display: 'flex',
-      flexDirection: 'column'
-    },
-    companyName: {
-      fontSize: '16px',
-      fontWeight: '600',
-      color: '#1a1a1a',
-      margin: 0
-    },
-    subtitle: {
-      fontSize: '12px',
-      color: '#666',
-      margin: 0
-    },
-    menuSection: {
-      flex: 1,
-      padding: '20px 0',
-      overflowY: 'auto'
-    },
-    sectionTitle: {
-      fontSize: '11px',
-      fontWeight: '600',
-      color: '#9ca3af',
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-      padding: '0 20px',
-      marginBottom: '8px'
-    },
-    menuList: {
-      listStyle: 'none',
-      padding: 0,
-      margin: '0 0 24px 0'
-    },
-    menuItem: {
-      margin: '4px 12px',
-      borderRadius: '8px',
-      overflow: 'hidden'
-    },
-    menuLink: (active) => ({
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      padding: '12px 16px',
-      color: active ? '#0d9488' : '#6b7280',
-      textDecoration: 'none',
-      fontSize: '14px',
-      fontWeight: active ? '600' : '500',
-      background: active ? '#f0fdfa' : 'transparent',
-      borderLeft: active ? '3px solid #0d9488' : '3px solid transparent',
-      transition: 'all 0.2s ease',
-      cursor: 'pointer'
-    }),
-    icon: {
-      fontSize: '20px',
-      flexShrink: 0
-    }
-  };
-
   return (
-    <div style={styles.sidebar}>
-      <div style={styles.logo}>
-        <div style={styles.logoIcon}>BT</div>
-        <div style={styles.logoText}>
-          <h3 style={styles.companyName}>Breeze Techniques</h3>
-          <p style={styles.subtitle}>Inventory Management</p>
+    <div className="fixed left-0 top-0 h-full w-64 bg-primary text-white flex flex-col z-50 shadow-xl">
+      {/* Header / Logo */}
+      <div className="p-6 flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center shrink-0">
+          <div className="h-4 w-4 bg-primary rounded-sm"></div>
+        </div>
+        <div className="flex flex-col">
+          <h1 className="text-lg font-bold leading-tight">Breeze Techniques</h1>
+          <span className="text-[10px] text-gray-400 font-medium">Inventory Management</span>
         </div>
       </div>
 
-      <div style={styles.menuSection}>
-        <div style={styles.sectionTitle}>MENU</div>
-        <ul style={styles.menuList}>
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const active = isActive(item.path);
+      {/* Menu List */}
+      <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto custom-scrollbar">
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          const active = location.pathname === item.path;
 
-            return (
-              <li key={item.path} style={styles.menuItem}>
-                <Link to={item.path} style={styles.menuLink(active)}>
-                  <Icon style={styles.icon} />
-                  <span>{item.label}</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`flex items-center gap-4 px-4 py-3.5 rounded-xl transition-all duration-200 group
+                ${active
+                  ? 'bg-gradient-to-r from-emerald-custom/20 to-transparent text-emerald-custom border-l-4 border-emerald-custom'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
+                }`}
+            >
+              <Icon className={`text-xl ${active ? 'text-emerald-custom' : 'text-gray-400 group-hover:text-white'}`} />
+              <span className="text-sm font-medium">{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* Bottom Actions */}
+      <div className="p-4 border-t border-white/10 space-y-2">
+        <Link
+          to="/help"
+          className="flex items-center gap-4 px-4 py-3 text-gray-400 hover:text-white hover:bg-white/5 rounded-xl transition-colors"
+        >
+          <HiOutlineQuestionMarkCircle className="text-xl" />
+          <span className="text-sm font-medium">Help & Support</span>
+        </Link>
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-4 px-4 py-3 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer text-left"
+        >
+          <HiOutlineLogout className="text-xl" />
+          <span className="text-sm font-medium">Log Out</span>
+        </button>
       </div>
     </div>
   );

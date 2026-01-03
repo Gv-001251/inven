@@ -24,64 +24,36 @@ const Header = () => {
     .toUpperCase();
 
   return (
-    <header className="h-16 flex items-center justify-between px-5 lg:px-8 border-b border-slate-100 bg-white/80 backdrop-blur-sm">
-      {/* Search */}
-      <div className="flex-1 max-w-xl">
-        <div className="relative">
-          <HiOutlineSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+    <header className="flex items-center justify-between mb-8">
+      {/* Search - styled like the image (pill shape, outlined) */}
+      <div className="flex-1 max-w-lg">
+        <div className="relative group">
+          <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-primary/60 group-focus-within:text-primary transition-colors" />
           <input
             type="text"
-            placeholder="Search inventory, items, or employees…"
-            className="w-full pl-10 pr-4 py-2.5 rounded-full bg-slate-50 border border-slate-200 focus:outline-none focus:ring-2 focus:ring-breeze-blue focus:border-transparent text-sm text-slate-800 placeholder:text-slate-400"
+            placeholder="Search..."
+            className="w-full pl-11 pr-4 py-3 rounded-full bg-white border border-primary/20 focus:outline-none focus:ring-2 focus:ring-emerald-custom/50 focus:border-emerald-custom text-sm text-primary placeholder:text-primary/40 shadow-sm transition-all"
           />
         </div>
       </div>
 
       {/* Right actions */}
-      <div className="flex items-center gap-3 lg:gap-4 ml-4">
+      <div className="flex items-center gap-4 ml-6">
         {/* Notifications */}
         <button
           type="button"
-          className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:text-breeze-blue hover:border-breeze-blue/40 transition-colors"
+          className="relative p-2 text-primary hover:bg-emerald-custom/10 rounded-full transition-colors"
           onClick={() => navigate('/notifications')}
           aria-label="Notifications"
         >
-          <HiOutlineBell className="h-5 w-5" />
-          <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-          </span>
+          <HiOutlineBell className="h-7 w-7" />
+          <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-red-500 border-2 border-mint" />
         </button>
 
-        {/* User chip */}
-        <button
-          type="button"
-          onClick={() => navigate('/profile')}
-          className="flex items-center gap-3 rounded-full bg-slate-50 border border-slate-200 px-2.5 lg:px-3 py-1.5 hover:bg-white hover:border-breeze-blue/40 shadow-sm hover:shadow transition-all"
-          title={`View Profile - ${employee?.name || 'User'}`}
-        >
-          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-[#06b6d4] to-[#4f46e5] text-white flex items-center justify-center text-xs font-semibold">
-            {initials}
-          </div>
-          <div className="hidden sm:block text-left">
-            <p className="text-xs font-medium text-slate-900 leading-tight">
-              {employee?.name || 'User'}
-            </p>
-            <p className="text-[11px] text-slate-500 leading-tight">
-              {employee?.email || 'inventory@breeze.tech'}
-            </p>
-          </div>
-        </button>
-
-        {/* Logout */}
-        <button
-          type="button"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-          onClick={handleLogout}
-          aria-label="Logout"
-        >
-          <HiOutlineLogout className="h-5 w-5" />
-        </button>
+        {/* User Profile */}
+        <div className="h-10 w-10 rounded-full bg-primary text-white flex items-center justify-center font-bold text-sm shadow-md cursor-pointer hover:scale-105 transition-transform" onClick={() => navigate('/profile')}>
+          {initials}
+        </div>
       </div>
     </header>
   );
