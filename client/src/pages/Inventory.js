@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  HiOutlineRefresh,
   HiOutlineQrcode,
-  HiOutlineCube,
-  HiOutlineExclamation,
-  HiOutlinePencil,
-  HiOutlineX,
   HiOutlineDownload,
-  HiOutlineCheckCircle,
   HiOutlineSearch,
-  HiOutlineFilter,
   HiOutlinePlus,
+  HiOutlineFilter,
+  HiOutlineChevronLeft,
+  HiOutlineChevronRight,
+  HiOutlineDotsVertical,
+  HiOutlineCheckCircle,
+  HiOutlineX,
+  HiOutlineCube,
   HiOutlineChevronDown
 } from 'react-icons/hi';
 import api from '../utils/axios';
@@ -31,22 +31,17 @@ const Inventory = () => {
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState(null);
 
-  // Threshold Editing State
-  const [editingItem, setEditingItem] = useState(null);
-  const [thresholdValue, setThresholdValue] = useState('');
-  const [savingThreshold, setSavingThreshold] = useState(false);
-
   // Lookup State (Stock Modal)
   const [lookedUpItem, setLookedUpItem] = useState(null);
-  const [lookingUp, setLookingUp] = useState(false);
-  const [lookupAttempted, setLookupAttempted] = useState(false);
-
-  // Scanner State
-  const [barcodeBuffer, setBarcodeBuffer] = useState('');
-  const [lastKeyTime, setLastKeyTime] = useState(Date.now());
 
   // Local UI State
   const [catalogueSearch, setCatalogueSearch] = useState('');
+
+  // Feature States
+  const [sortOption, setSortOption] = useState('Default'); // 'Default', 'Name', 'Stock'
+  const [filterOption, setFilterOption] = useState('All'); // 'All', 'Low Stock', or specific category
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   const loadInventory = async () => {
     try {
@@ -62,20 +57,13 @@ const Inventory = () => {
   const handleLookup = async (query) => {
     if (!query || query.trim() === '') {
       setLookedUpItem(null);
-      setLookupAttempted(false);
       return;
     }
-    setLookingUp(true);
-    setLookupAttempted(false);
     try {
       const { data } = await api.get(`/inventory/lookup?q=${encodeURIComponent(query.trim())}`);
       setLookedUpItem(data.item);
-      setLookupAttempted(true);
     } catch (error) {
       setLookedUpItem(null);
-      setLookupAttempted(true);
-    } finally {
-      setLookingUp(false);
     }
   };
 
@@ -83,39 +71,7 @@ const Inventory = () => {
     loadInventory();
   }, []);
 
-  // Barcode Scanner Integration (Opening Modal automatically if scan detected could be a nice touch, but following explicit button click for now)
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      const currentTime = Date.now();
-      if (e.altKey || e.ctrlKey || e.metaKey) return;
-
-      if (currentTime - lastKeyTime > 8000) {
-        setBarcodeBuffer('');
-      }
-      setLastKeyTime(currentTime);
-
-      if (e.key === 'Enter') {
-        if (barcodeBuffer.trim()) {
-          // Check if modals are open, if not, maybe open stock modal? 
-          // For now, let's just populate the form if the modal is OPEN
-          if (showStockModal) {
-            const code = barcodeBuffer.trim();
-            setForm((prev) => ({ ...prev, barcode: code }));
-            handleLookup(code);
-          }
-        }
-        setBarcodeBuffer('');
-        return;
-      }
-
-      if (e.key.length === 1) {
-        setBarcodeBuffer((prev) => prev + e.key);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [barcodeBuffer, lastKeyTime, showStockModal]);
+  // --- Handlers ---
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -131,10 +87,7 @@ const Inventory = () => {
       setMessage({ type: 'success', text: 'Inventory updated successfully.' });
       setForm({ barcode: '', action: form.action, quantity: 1, reason: '' });
       setLookedUpItem(null);
-      setLookupAttempted(false);
       await loadInventory();
-      // Optionally close modal after success?
-      // setShowStockModal(false); 
     } catch (error) {
       setMessage({
         type: 'error',
@@ -145,57 +98,93 @@ const Inventory = () => {
     }
   };
 
-  // --- handlers for Product Modal ---
   const handleProductClick = (item) => {
     setSelectedProduct(item);
     setShowProductModal(true);
   };
 
-  const lowStockItems = useMemo(() => inventory.lowStock || [], [inventory.lowStock]);
-  const canConfigureThreshold = hasPermission && hasPermission('configureThresholds');
+  const handleExport = () => {
+    // Export current filtered items
+    const csvContent = [
+      Object.keys({ Name: '', Barcode: '', Category: '', Stock: '', Threshold: '' }).join(','),
+      ...filteredItems.map(item => [
+        `"${item.name}"`,
+        `"${item.barcode}"`,
+        `"${item.category}"`,
+        item.stock,
+        item.threshold
+      ].join(','))
+    ].join('\n');
 
-  const startEditingThreshold = (item, e) => {
-    e.stopPropagation(); // Prevent opening modal
-    setEditingItem(item.id);
-    setThresholdValue(item.threshold);
-    setMessage(null);
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inventory_export_${new Date().toLocaleDateString()}.csv`;
+    a.click();
   };
 
-  const cancelEditingThreshold = (e) => {
-    if (e) e.stopPropagation();
-    setEditingItem(null);
-    setThresholdValue('');
-  };
+  // --- Logic ---
 
-  const handleSaveThreshold = async (itemId, e) => {
-    if (e) e.stopPropagation();
-    setSavingThreshold(true);
-    setMessage(null);
-    try {
-      await api.put(`/inventory/items/${itemId}`, { threshold: Number(thresholdValue) });
-      setEditingItem(null);
-      setThresholdValue('');
-      await loadInventory();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setSavingThreshold(false);
-    }
-  };
+  // Get unique categories for filter
+  const categories = useMemo(() => {
+    const cats = new Set(inventory.items.map(i => i.category).filter(Boolean));
+    return ['All', 'Low Stock', ...Array.from(cats)];
+  }, [inventory.items]);
 
   const filteredItems = useMemo(() => {
-    if (!catalogueSearch) return inventory.items;
-    const lower = catalogueSearch.toLowerCase();
-    return inventory.items.filter(item =>
-      item.name.toLowerCase().includes(lower) ||
-      item.barcode.includes(catalogueSearch) ||
-      item.category.toLowerCase().includes(lower)
-    );
-  }, [inventory.items, catalogueSearch]);
+    let result = [...inventory.items];
 
-  const totalStock = inventory.items.reduce((acc, item) => acc + Number(item.stock || 0), 0);
+    // 1. Search
+    if (catalogueSearch) {
+      const lower = catalogueSearch.toLowerCase();
+      result = result.filter(item =>
+        item.name.toLowerCase().includes(lower) ||
+        item.barcode.includes(catalogueSearch) ||
+        item.category.toLowerCase().includes(lower)
+      );
+    }
 
-  // --- Generic Modal Component Styles ---
+    // 2. Filter
+    if (filterOption === 'Low Stock') {
+      result = result.filter(i => i.stock <= i.threshold);
+    } else if (filterOption !== 'All') {
+      result = result.filter(i => i.category === filterOption);
+    }
+
+    // 3. Sort
+    if (sortOption === 'Name') {
+      result.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortOption === 'Stock') {
+      result.sort((a, b) => a.stock - b.stock);
+    }
+
+    return result;
+  }, [inventory.items, catalogueSearch, filterOption, sortOption]);
+
+  const recentTransactions = useMemo(() => {
+    return (inventory.transactions || []).slice(0, 7);
+  }, [inventory.transactions]);
+
+
+  // --- Helper Components ---
+  const TableHeaderCell = ({ children, className = "" }) => (
+    <th className={`p-4 text-left font-bold text-[10px] uppercase tracking-wider text-white ${className}`}>
+      {children}
+    </th>
+  );
+
+  const TableRow = ({ children, index, onClick }) => (
+    <tr
+      onClick={onClick}
+      className={`border-b border-primary/10 transition-colors 
+            ${index % 2 === 0 ? 'bg-[#115e59]' : 'bg-[#0f766e]'} 
+            hover:opacity-90 cursor-pointer text-white text-xs font-medium`}
+    >
+      {children}
+    </tr>
+  );
+
   const ModalBackdrop = ({ children, onClose }) => (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in" onClick={onClose}>
       <div onClick={e => e.stopPropagation()}>
@@ -205,145 +194,203 @@ const Inventory = () => {
   );
 
   return (
-    <div className="min-h-screen bg-mint p-8">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-8 gap-4">
-        <div>
+    <div className="min-h-screen bg-mint p-8 font-sans" onClick={() => { setShowSortMenu(false); setShowFilterMenu(false); }}>
+
+      {/* 1. Header & Recent Items */}
+      <div className="mb-12">
+        <div className="flex items-center justify-between mb-8">
           <h1 className="text-3xl font-extrabold text-primary">Inventory</h1>
-          <p className="text-secondary text-sm mt-1">Manage stock, track movements, and configure alerts.</p>
+          {/* Header Icons if needed */}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-primary/10 text-xs font-semibold text-primary">
-            <HiOutlineCube className="text-emerald-custom" /> {inventory.items.length} Items
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold text-primary">Recent Items</h2>
+          <div className="flex items-center gap-4">
+            <button onClick={handleExport} className="flex items-center gap-2 text-primary font-bold text-sm hover:opacity-80 transition-opacity">
+              <HiOutlineDownload className="text-lg" /> Export
+            </button>
+            <button
+              onClick={() => setShowStockModal(true)}
+              className="flex items-center gap-2 px-5 py-2 border border-primary text-primary rounded-full text-sm font-bold hover:bg-primary hover:text-white transition-colors"
+            >
+              <HiOutlineQrcode className="text-lg" /> Bar Code Scanner
+            </button>
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-white rounded-lg border border-primary/10 text-xs font-semibold text-primary">
-            <HiOutlineCheckCircle className="text-blue-500" /> {totalStock} Total Stock
+        </div>
+
+        <div className="rounded-2xl overflow-hidden shadow-lg border border-primary/20">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-[#0C3834] text-white">
+                  <TableHeaderCell className="w-10 text-center"><div className="w-4 h-4 border border-white/50 rounded mx-auto" /></TableHeaderCell>
+                  <TableHeaderCell>ID</TableHeaderCell>
+                  <TableHeaderCell>ITEM NAME</TableHeaderCell>
+                  <TableHeaderCell>CATEGORY</TableHeaderCell>
+                  <TableHeaderCell>STOCK STATUS</TableHeaderCell>
+                  <TableHeaderCell>PRICE</TableHeaderCell>
+                  <TableHeaderCell>Time Stamp</TableHeaderCell>
+                  <TableHeaderCell className="w-10"></TableHeaderCell>
+                </tr>
+              </thead>
+              <tbody>
+                {recentTransactions.length === 0 ? (
+                  <tr><td colSpan="8" className="p-8 text-center text-primary/50 italic bg-white">No recent items found.</td></tr>
+                ) : (
+                  recentTransactions.map((tx, idx) => {
+                    // Mocking some data fields
+                    const mockId = `COMP-${String(idx + 1).padStart(3, '0')}`;
+
+                    return (
+                      <TableRow key={idx} index={idx}>
+                        <td className="p-4 text-center"><div className="w-4 h-4 border border-white/50 rounded mx-auto cursor-pointer" /></td>
+                        <td className="p-4">{mockId}</td>
+                        <td className="p-4 font-bold">{tx.itemName || tx.item_name}</td>
+                        <td className="p-4">Component</td>
+                        <td className="p-4 text-center">{tx.quantity}</td>
+                        <td className="p-4">$300</td>
+                        <td className="p-4">{new Date(tx.timestamp).toLocaleDateString()}</td>
+                        <td className="p-4 text-center"><HiOutlineDotsVertical className="text-lg cursor-pointer hover:text-white/70" /></td>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
-
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-primary text-primary rounded-lg text-sm font-semibold hover:bg-primary/5 transition-colors">
-            <HiOutlineDownload className="text-lg" /> Export
-          </button>
-
-          <button
-            onClick={() => setShowStockModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-primary text-primary rounded-full text-sm font-semibold hover:bg-primary/5 transition-colors shadow-sm"
-          >
-            <HiOutlineQrcode className="text-lg" /> Bar Code Scanner
-          </button>
         </div>
       </div>
 
-      {/* Grid Layout */}
-      <div className="grid grid-cols-12 gap-6">
+      {/* 2. Inventory Catalogue Section */}
+      <div className="mb-12">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-6 gap-4">
+          <h2 className="text-xl font-bold text-primary">Inventory Catalogue</h2>
 
-        {/* Low Stock (Moved to side or kept, but removing the big inline scanner as planned) */}
-        <div className="col-span-12">
-          {lowStockItems.length > 0 && (
-            <div className="bg-red-50 border border-red-100 rounded-2xl p-4 mb-6 flex items-center gap-4 shadow-sm">
-              <div className="bg-red-100 p-2 rounded-full text-red-600">
-                <HiOutlineExclamation className="text-xl" />
-              </div>
-              <div>
-                <h3 className="font-bold text-red-700">Low Stock Alert</h3>
-                <p className="text-xs text-red-600">There are {lowStockItems.length} items below their threshold.</p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Recent Activity Section */}
-        <div className="col-span-12 lg:col-span-4">
-          {/* Re-using recent activity logic but maybe compacter if sidebar? Or keep full width? 
-               User asks for modals, didn't ask to change page layout much, but the inline scanner is gone.
-               Let's keep Recent Activity full width or side-by-side with Catalogue.
-               Let's keep it below catalogue or above. 
-               Let's put Search and Catalogue first as it's the main interaction point.
-           */}
-        </div>
-
-        {/* Inventory Catalogue */}
-        <div className="col-span-12">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-primary">Inventory Catalogue</h2>
-            <div className="relative w-64">
-              <HiOutlineSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <div className="flex flex-wrap items-center gap-4 md:gap-6">
+            {/* Search */}
+            <div className="relative">
+              <HiOutlineSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-primary text-lg" />
               <input
                 type="text"
-                placeholder="Search catalogue..."
+                placeholder="Search"
                 value={catalogueSearch}
                 onChange={(e) => setCatalogueSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 bg-white border border-primary/20 rounded-lg text-sm focus:outline-none focus:border-emerald-custom"
+                className="pl-12 pr-4 py-2 bg-transparent border border-primary rounded-full text-primary placeholder-primary/60 text-sm focus:outline-none focus:ring-1 focus:ring-primary w-64"
               />
             </div>
+
+            <button onClick={handleExport} className="flex items-center gap-2 text-primary font-bold text-sm hover:opacity-80">
+              <HiOutlineDownload className="text-lg" /> Export
+            </button>
+
+            {/* Sort By Dropdown */}
+            <div className="relative">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowSortMenu(!showSortMenu); setShowFilterMenu(false); }}
+                className="flex items-center gap-2 text-primary font-bold text-sm hover:opacity-80"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" /></svg>
+                Sort By: {sortOption !== 'Default' ? sortOption : ''}
+              </button>
+
+              {showSortMenu && (
+                <div className="absolute right-0 top-full mt-2 w-40 bg-white shadow-xl rounded-lg overflow-hidden border border-primary/10 z-20">
+                  {['Default', 'Name', 'Stock'].map(opt => (
+                    <button
+                      key={opt}
+                      onClick={() => { setSortOption(opt); setShowSortMenu(false); }}
+                      className={`w-full text-left px-4 py-2 text-sm hover:bg-emerald-50 text-gray-700 ${sortOption === opt ? 'bg-emerald-50 font-bold text-primary' : ''}`}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <button className="flex items-center gap-2 text-primary font-bold text-sm hover:opacity-80">
+              <HiOutlinePlus className="text-lg" /> Add Item
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-4 px-1">
+          {/* Filter Dropdown */}
+          <div className="relative flex items-center gap-4">
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowFilterMenu(!showFilterMenu); setShowSortMenu(false); }}
+              className="text-primary hover:text-primary/70 flex items-center gap-2"
+              title="Filter Categories"
+            >
+              <HiOutlineFilter className="text-2xl" />
+              <span className="text-sm font-bold text-primary">{filterOption !== 'All' ? filterOption : ''}</span>
+            </button>
+
+            {showFilterMenu && (
+              <div className="absolute left-0 top-full mt-2 w-48 bg-white shadow-xl rounded-lg overflow-hidden border border-primary/10 z-20 max-h-60 overflow-y-auto custom-scrollbar">
+                {categories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => { setFilterOption(cat); setShowFilterMenu(false); }}
+                    className={`w-full text-left px-4 py-2 text-sm hover:bg-emerald-50 text-gray-700 ${filterOption === cat ? 'bg-emerald-50 font-bold text-primary' : ''}`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Removed Toggle Switch as requested */}
           </div>
 
-          <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-primary/5 animate-fade-in-up">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-primary text-white text-xs uppercase tracking-wider">
-                    <th className="p-4 rounded-tl-lg">ID</th>
-                    <th className="p-4">Item Name</th>
-                    <th className="p-4">Category</th>
-                    <th className="p-4 text-center">Stock</th>
-                    <th className="p-4 text-center">Threshold</th>
-                    <th className="p-4 text-right rounded-tr-lg">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm text-gray-600">
-                  {filteredItems.map((item, idx) => (
-                    <tr
-                      key={item.id}
-                      onClick={() => handleProductClick(item)}
-                      className={`border-b border-gray-50 last:border-0 hover:bg-emerald-50/50 transition-colors cursor-pointer ${idx % 2 === 0 ? 'bg-mint/20' : 'bg-white'}`}
-                    >
-                      <td className="p-4 font-mono text-xs text-emerald-800/60">
-                        COMP-{String(idx + 1).padStart(3, '0')}
-                      </td>
-                      <td className="p-4">
-                        <div className="font-semibold text-gray-800">{item.name}</div>
-                        <div className="text-[10px] text-gray-400">{item.barcode}</div>
-                      </td>
-                      <td className="p-4 text-gray-500">{item.category}</td>
-                      <td className="p-4 text-center">
-                        <span className={`font-bold ${item.stock <= item.threshold ? 'text-red-500' : 'text-emerald-600'}`}>
-                          {item.stock}
-                        </span>
-                      </td>
-                      <td className="p-4 text-center" onClick={e => e.stopPropagation()}>
-                        {editingItem === item.id ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <input
-                              type="number"
-                              value={thresholdValue}
-                              onChange={(e) => setThresholdValue(e.target.value)}
-                              className="w-16 px-1 py-1 text-center border rounded font-mono text-xs"
-                              autoFocus
-                            />
-                            <button onClick={(e) => handleSaveThreshold(item.id, e)} className="text-emerald-600"><HiOutlineCheckCircle /></button>
-                            <button onClick={cancelEditingThreshold} className="text-red-500"><HiOutlineX /></button>
-                          </div>
-                        ) : (
-                          <span className="text-gray-400 font-mono text-xs cursor-pointer hover:text-primary" onClick={(e) => canConfigureThreshold && startEditingThreshold(item, e)}>
-                            {item.threshold} <HiOutlinePencil className="inline ml-1 opacity-0 hover:opacity-100" />
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 text-right">
-                        <span className="text-xs text-emerald-500 font-bold hover:underline">View</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="flex items-center gap-4 text-sm font-bold text-primary">
+            <span>1/10</span>
+            <div className="flex gap-2">
+              <button className="w-8 h-8 rounded bg-primary/10 flex items-center justify-center hover:bg-primary/20"><HiOutlineChevronLeft /></button>
+              <button className="w-8 h-8 rounded bg-primary text-white flex items-center justify-center hover:bg-primary/90"><HiOutlineChevronRight /></button>
             </div>
           </div>
         </div>
 
+        <div className="rounded-2xl overflow-hidden shadow-lg border border-primary/20 min-h-[400px]">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-[#0C3834] text-white">
+                  <TableHeaderCell className="w-10 text-center"><div className="w-4 h-4 border border-white/50 rounded mx-auto" /></TableHeaderCell>
+                  <TableHeaderCell>ID</TableHeaderCell>
+                  <TableHeaderCell>ITEM NAME</TableHeaderCell>
+                  <TableHeaderCell>CATEGORY</TableHeaderCell>
+                  <TableHeaderCell>STOCK STATUS</TableHeaderCell>
+                  <TableHeaderCell>PRICE</TableHeaderCell>
+                  <TableHeaderCell>Time Stamp</TableHeaderCell>
+                  <TableHeaderCell className="w-10"></TableHeaderCell>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredItems.length === 0 ? (
+                  <tr><td colSpan="8" className="p-8 text-center text-primary/50 italic bg-white">No items found.</td></tr>
+                ) : (
+                  filteredItems.map((item, idx) => (
+                    <TableRow key={item.id} index={idx} onClick={() => handleProductClick(item)}>
+                      <td className="p-4 text-center"><div onClick={(e) => e.stopPropagation()} className="w-4 h-4 border border-white/50 rounded mx-auto cursor-pointer" /></td>
+                      <td className="p-4 font-mono text-white/80">COMP-{String(idx + 1).padStart(3, '0')}</td>
+                      <td className="p-4 font-bold">{item.name}</td>
+                      <td className="p-4">{item.category}</td>
+                      <td className="p-4 text-center font-bold">{item.stock}</td>
+                      <td className="p-4">$300</td>
+                      <td className="p-4 text-white/80">25/12/2025</td>
+                      <td className="p-4 text-center"><HiOutlineDotsVertical className="text-lg cursor-pointer hover:text-white/70" onClick={(e) => e.stopPropagation()} /></td>
+                    </TableRow>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
-      {/* --- STOCK IN/OUT MODAL --- */}
+      {/* --- STOCK MODAL --- */}
       {showStockModal && (
         <ModalBackdrop onClose={() => setShowStockModal(false)}>
           <div className="bg-primary rounded-3xl p-8 w-[500px] shadow-2xl relative text-white animate-scale-in">
@@ -368,11 +415,10 @@ const Inventory = () => {
                     className="w-full bg-transparent border border-white/30 rounded-lg pl-12 pr-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all font-medium"
                   />
                 </div>
-                {/* Quick Item Preview if Looked Up */}
                 {lookedUpItem && (
                   <div className="mt-2 text-xs text-emerald-300 font-bold bg-white/10 p-2 rounded flex justify-between">
                     <span>{lookedUpItem.name}</span>
-                    <span>Current: {lookedUpItem.stock}</span>
+                    <span>Stock: {lookedUpItem.stock}</span>
                   </div>
                 )}
               </div>
@@ -413,7 +459,7 @@ const Inventory = () => {
                   rows="3"
                   value={form.reason}
                   onChange={handleChange}
-                  placeholder="Reason for inventory update"
+                  placeholder="Reason for update..."
                   className="w-full bg-transparent border border-white/30 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-emerald-400 resize-none"
                 />
               </div>
@@ -440,34 +486,29 @@ const Inventory = () => {
       {showProductModal && selectedProduct && (
         <ModalBackdrop onClose={() => setShowProductModal(false)}>
           <div className="w-[300px] shadow-2xl animate-scale-in">
-            {/* Top: Image Area (White) */}
             <div className="bg-white rounded-t-3xl p-8 flex items-center justify-center relative min-h-[180px]">
               <button onClick={() => setShowProductModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
                 <HiOutlineX className="text-xl" />
               </button>
 
-              {/* Placeholder Image or Real Image */}
               {selectedProduct.image ? (
                 <img src={selectedProduct.image} alt={selectedProduct.name} className="w-32 h-32 object-contain" />
               ) : (
-                // 3D Placeholder if no image
                 <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-gray-300">
                   <HiOutlineCube className="text-5xl" />
                 </div>
               )}
             </div>
 
-            {/* Bottom: Info Area (Dark Green) */}
             <div className="bg-primary rounded-b-3xl p-6 text-white text-center">
               <h3 className="font-bold text-lg mb-4">{selectedProduct.name}</h3>
-
               <div className="space-y-2 text-sm text-left px-4">
                 <div className="flex justify-between border-b border-white/10 pb-2">
-                  <span className="text-white/70 text-xs uppercase font-bold">Stock in Inventory :</span>
+                  <span className="text-white/70 text-xs uppercase font-bold">Stock :</span>
                   <span className="font-bold">{selectedProduct.stock}</span>
                 </div>
                 <div className="flex justify-between pt-2">
-                  <span className="text-white/70 text-xs uppercase font-bold">Min. Stock :</span>
+                  <span className="text-white/70 text-xs uppercase font-bold">Threshold :</span>
                   <span className="font-bold">{selectedProduct.threshold}</span>
                 </div>
               </div>
