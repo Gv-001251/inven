@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../utils/axios';
 import {
   HiOutlineDownload,
   HiOutlineMail,
@@ -67,7 +67,6 @@ const Invoice = () => {
   const handleSubmit = async (type) => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
       const invoiceData = {
         ...formData,
         subtotal: totals.subtotal,
@@ -77,9 +76,7 @@ const Invoice = () => {
         paymentStatus: 'pending'
       };
 
-      await axios.post('http://localhost:5001/api/invoices/create', invoiceData, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.post('/invoices/create', invoiceData);
 
       alert(`Invoice ${type === 'send' ? 'sent' : 'saved'} successfully!`);
 
@@ -107,10 +104,7 @@ const Invoice = () => {
 
   const fetchInvoices = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:5001/api/invoices/list', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const response = await api.get('/invoices/list');
       setInvoices(response.data.data || []);
     } catch (error) {
       console.error('Error fetching invoices:', error);
@@ -119,7 +113,10 @@ const Invoice = () => {
   };
 
   const downloadPDF = (billNumber) => {
-    window.open(`http://localhost:5001/api/invoices/download/${billNumber}`, '_blank');
+    // For direct links, we can use the base URL from the api config logic or hardcode relative if proxy setup, 
+    // but here we are fixing the port mismatch so direct localhost:5000 is safer than 5001
+    // Ideally we should export BASE_URL from axios.js but for now hardcoding 5000 is better than 5001.
+    window.open(`http://localhost:5000/api/invoices/download/${billNumber}`, '_blank');
   };
 
   return (
@@ -134,8 +131,8 @@ const Invoice = () => {
         <button
           onClick={() => setActiveTab('create')}
           className={`pb-1 text-base font-bold transition-all ${activeTab === 'create'
-              ? 'text-primary border-b-2 border-primary'
-              : 'text-gray-500 hover:text-primary'
+            ? 'text-primary border-b-2 border-primary'
+            : 'text-gray-500 hover:text-primary'
             }`}
         >
           New Invoice
@@ -143,8 +140,8 @@ const Invoice = () => {
         <button
           onClick={() => { setActiveTab('list'); fetchInvoices(); }}
           className={`pb-1 text-base font-bold transition-all ${activeTab === 'list'
-              ? 'text-primary border-b-2 border-primary'
-              : 'text-gray-500 hover:text-primary'
+            ? 'text-primary border-b-2 border-primary'
+            : 'text-gray-500 hover:text-primary'
             }`}
         >
           View Invoices
@@ -371,17 +368,13 @@ const Invoice = () => {
 
           {/* Invoice Preview (Paper) */}
           <div className="bg-white p-12 shadow-2xl mx-auto max-w-[800px] min-h-[1000px] relative">
-            {/* Paper Content logic remains same as previous step, omitted for brevity but assumed present if this was a patch. 
-                  Since I am overwriting, I must include it. */}
             <div className="border border-gray-400 p-8 h-full flex flex-col justify-between">
               <div>
                 <h1 className="text-center font-serif text-2xl font-bold uppercase mb-2 tracking-widest text-black">Breeze Techniques</h1>
                 <p className="text-center font-serif text-sm font-bold text-gray-800 uppercase mb-4">
                   113-Makakavi Nagar-Irugur-Coimbatore-641103.
                 </p>
-                {/* ... (rest of paper preview) ... */}
-                {/* Simplified for this artifact to focus on the View Invoices Tab changes, 
-                        BUT I MUST INCLUDE FULL CONTENT for the Overwrite to work properly. */}
+
                 <div className="text-center text-xs font-serif mb-6 border-b border-black pb-4">
                   GSTIN NO: 33AQKPG9936F1Z0 | MOB: 0000000000
                 </div>

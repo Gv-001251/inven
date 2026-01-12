@@ -8,9 +8,11 @@ import {
   HiOutlineBell,
   HiOutlineCog,
   HiOutlineDocumentText,
+  HiOutlineDocumentReport,
   HiOutlineCube,
   HiOutlineLogout,
-  HiOutlineQuestionMarkCircle
+  HiOutlineQuestionMarkCircle,
+  HiOutlineReceiptTax
 } from 'react-icons/hi';
 import { useAuth } from '../context/AuthContext';
 
@@ -25,6 +27,8 @@ const Sidebar = () => {
     { path: '/attendance', icon: HiOutlineUsers, label: 'Attendance', permission: 'viewAttendance' },
     { path: '/invoice', icon: HiOutlineDocumentText, label: 'Invoice', permission: 'viewInvoices' },
     { path: '/purchase', icon: HiOutlineShoppingCart, label: 'Purchase', permission: 'createPurchaseRequest' },
+    { path: '/gst-upload', icon: HiOutlineDocumentReport, label: 'GST Upload', permission: 'viewInventory' },
+    { path: '/einvoice', icon: HiOutlineReceiptTax, label: 'E-Invoice', permission: 'viewInventory' },
     { path: '/notifications', icon: HiOutlineBell, label: 'Notification', permission: 'viewNotifications' },
     { path: '/settings', icon: HiOutlineCog, label: 'Settings', permission: 'manageRoles' }
   ].filter(item => !item.permission || hasPermission(item.permission));

@@ -57,7 +57,7 @@ function Login() {
       } else if (err.request) {
         // Request made but no response
         console.error('No response from server');
-        setError('Network error - is server running on port 5001?');
+        setError('Network error - is server running on port 5000?');
       } else {
         // Something else happened
         console.error('Error:', err.message);

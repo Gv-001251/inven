@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { HiOutlineUserAdd, HiOutlineShieldCheck } from 'react-icons/hi';
-import axios from 'axios';
+import api from '../utils/axios';
 
 const Settings = () => {
   const [roles, setRoles] = useState([]);
@@ -25,16 +25,11 @@ const Settings = () => {
 
   const loadData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const config = {
-        headers: { Authorization: `Bearer ${token}` }
-      };
-
       const [rolesRes, employeesRes] = await Promise.all([
-        axios.get('http://localhost:5001/api/roles', config),
-        axios.get('http://localhost:5001/api/employees', config),
+        api.get('/roles'),
+        api.get('/employees'),
       ]);
-      
+
       setRoles(rolesRes.data.roles || []);
       setPermissionsCatalog(rolesRes.data.permissionsCatalog || {});
       setEmployees(employeesRes.data.employees || []);
@@ -73,11 +68,8 @@ const Settings = () => {
     setProcessing(true);
     setMessage(null);
     try {
-      const token = localStorage.getItem('token');
-      await axios.post('http://localhost:5001/api/employees', form, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
+      await api.post('/employees', form);
+
       setMessage({ type: 'success', text: 'Employee added successfully.' });
       setForm({
         name: '',
@@ -107,16 +99,14 @@ const Settings = () => {
     setSavingRole(true);
     setMessage(null);
     try {
-      const token = localStorage.getItem('token');
       const permissionsToSave = { ...(rolePermissions || {}) };
       delete permissionsToSave.fullAccess;
-      
-      const { data } = await axios.put(
-        `http://localhost:5001/api/roles/${selectedRoleId}/permissions`,
-        { permissions: permissionsToSave },
-        { headers: { Authorization: `Bearer ${token}` }}
+
+      const { data } = await api.put(
+        `/roles/${selectedRoleId}/permissions`,
+        { permissions: permissionsToSave }
       );
-      
+
       setRoles((prev) =>
         prev.map((role) =>
           role.id === selectedRoleId ? data.role : role,
@@ -262,22 +252,22 @@ const Settings = () => {
 
       {/* Role Permissions */}
       <div style={styles.card}>
-        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px'}}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h2 style={styles.cardTitle}>
-            <HiOutlineShieldCheck style={{marginRight: '8px', color: '#0d9488', fontSize: '20px'}} />
+            <HiOutlineShieldCheck style={{ marginRight: '8px', color: '#0d9488', fontSize: '20px' }} />
             Role Permissions
           </h2>
-          <span style={{fontSize: '12px', color: '#9ca3af'}}>
+          <span style={{ fontSize: '12px', color: '#9ca3af' }}>
             Only non-executive roles can be modified.
           </span>
         </div>
 
         {editableRoles.length === 0 ? (
-          <p style={{fontSize: '14px', color: '#9ca3af'}}>
+          <p style={{ fontSize: '14px', color: '#9ca3af' }}>
             No roles available for editing.
           </p>
         ) : (
-          <div style={{display: 'grid', gridTemplateColumns: '2fr 3fr', gap: '24px'}}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 3fr', gap: '24px' }}>
             {/* Role Selector */}
             <div>
               <label style={styles.label}>Select Role</label>
@@ -293,7 +283,7 @@ const Settings = () => {
                   </option>
                 ))}
               </select>
-              <p style={{marginTop: '8px', fontSize: '12px', color: '#9ca3af'}}>
+              <p style={{ marginTop: '8px', fontSize: '12px', color: '#9ca3af' }}>
                 Permissions update instantly and apply to all employees in the selected role.
               </p>
             </div>
@@ -305,7 +295,7 @@ const Settings = () => {
                   {permissionsList.map(([key, description]) => (
                     <label
                       key={key}
-                      style={{display: 'flex', gap: '12px', marginBottom: '12px', cursor: 'pointer'}}
+                      style={{ display: 'flex', gap: '12px', marginBottom: '12px', cursor: 'pointer' }}
                     >
                       <input
                         type="checkbox"
@@ -314,10 +304,10 @@ const Settings = () => {
                         onChange={() => togglePermission(key)}
                       />
                       <div>
-                        <p style={{fontSize: '14px', fontWeight: '600', color: '#1a1a1a', margin: 0}}>
+                        <p style={{ fontSize: '14px', fontWeight: '600', color: '#1a1a1a', margin: 0 }}>
                           {key.replace(/([A-Z])/g, ' $1')}
                         </p>
-                        <p style={{fontSize: '12px', color: '#666', margin: '2px 0 0 0'}}>
+                        <p style={{ fontSize: '12px', color: '#666', margin: '2px 0 0 0' }}>
                           {description}
                         </p>
                       </div>
@@ -327,13 +317,13 @@ const Settings = () => {
                     type="button"
                     onClick={handleSavePermissions}
                     disabled={savingRole}
-                    style={{...styles.button, marginTop: '12px'}}
+                    style={{ ...styles.button, marginTop: '12px' }}
                   >
                     {savingRole ? 'Saving…' : 'Save changes'}
                   </button>
                 </div>
               ) : (
-                <div style={{padding: '24px', fontSize: '14px', color: '#9ca3af', background: '#f9fafb', border: '2px dashed #e5e7eb', borderRadius: '12px', textAlign: 'center'}}>
+                <div style={{ padding: '24px', fontSize: '14px', color: '#9ca3af', background: '#f9fafb', border: '2px dashed #e5e7eb', borderRadius: '12px', textAlign: 'center' }}>
                   Select a role to review and update its permissions.
                 </div>
               )}
@@ -345,11 +335,11 @@ const Settings = () => {
       {/* Add Employee */}
       <div style={styles.card}>
         <h2 style={styles.cardTitle}>
-          <HiOutlineUserAdd style={{marginRight: '8px', color: '#0d9488', fontSize: '20px'}} />
+          <HiOutlineUserAdd style={{ marginRight: '8px', color: '#0d9488', fontSize: '20px' }} />
           Add Employee
         </h2>
         <form onSubmit={handleSubmit}>
-          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px'}}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
               <label style={styles.label}>Name</label>
               <input
@@ -421,7 +411,7 @@ const Settings = () => {
               />
             </div>
           </div>
-          <div style={{marginTop: '16px'}}>
+          <div style={{ marginTop: '16px' }}>
             <button type="submit" disabled={processing} style={styles.button}>
               {processing ? 'Adding…' : 'Add Employee'}
             </button>
@@ -431,10 +421,10 @@ const Settings = () => {
 
       {/* All Employees Table */}
       <div style={styles.card}>
-        <div style={{marginBottom: '16px'}}>
-          <h2 style={{...styles.cardTitle, marginBottom: 0}}>All Employees</h2>
+        <div style={{ marginBottom: '16px' }}>
+          <h2 style={{ ...styles.cardTitle, marginBottom: 0 }}>All Employees</h2>
         </div>
-        <div style={{overflowX: 'auto'}}>
+        <div style={{ overflowX: 'auto' }}>
           <table style={styles.table}>
             <thead>
               <tr>
@@ -449,7 +439,7 @@ const Settings = () => {
                 const role = roles.find((r) => r.id === employee.roleId);
                 return (
                   <tr key={employee.id}>
-                    <td style={{...styles.td, fontWeight: '500', color: '#1a1a1a'}}>
+                    <td style={{ ...styles.td, fontWeight: '500', color: '#1a1a1a' }}>
                       {employee.name}
                     </td>
                     <td style={styles.td}>{employee.designation}</td>
@@ -472,7 +462,7 @@ const Settings = () => {
               })}
               {employees.length === 0 && (
                 <tr>
-                  <td colSpan="4" style={{...styles.td, textAlign: 'center', color: '#9ca3af'}}>
+                  <td colSpan="4" style={{ ...styles.td, textAlign: 'center', color: '#9ca3af' }}>
                     No employees found.
                   </td>
                 </tr>

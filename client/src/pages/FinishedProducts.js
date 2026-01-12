@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../utils/axios';
 import {
   HiOutlineRefresh,
   HiOutlinePlus,
@@ -56,13 +56,10 @@ const FinishedProducts = () => {
   const fetchAllData = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const config = { headers: { 'Authorization': `Bearer ${token}` } }; // Ensure token is used if auth is required
-
-      // Adjust URLs if needed to match your backend environment usually localhost:5001 or equivalent
+      // API calls using centralized instance
       const [productsRes, transactionsRes] = await Promise.all([
-        axios.get('http://localhost:5001/api/finished-products', config),
-        axios.get('http://localhost:5001/api/finished-products/transactions', config)
+        api.get('/finished-products'),
+        api.get('/finished-products/transactions')
       ]);
 
       if (productsRes.data.success) {
@@ -105,20 +102,13 @@ const FinishedProducts = () => {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const config = { headers: { 'Authorization': `Bearer ${token}` } };
-
-      const response = await axios.post(
-        'http://localhost:5001/api/finished-products/update-stock',
-        {
-          productId: selectedProduct.id,
-          action: actionType,
-          quantity: parseInt(formData.quantity),
-          reason: formData.reason,
-          userName: formData.userName
-        },
-        config
-      );
+      const response = await api.post('/finished-products/update-stock', {
+        productId: selectedProduct.id,
+        action: actionType,
+        quantity: parseInt(formData.quantity),
+        reason: formData.reason,
+        userName: formData.userName
+      });
 
       if (response.data.success) {
         alert(`${actionType} successfully! New stock: ${response.data.newStock}`);
@@ -160,13 +150,7 @@ const FinishedProducts = () => {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const config = { headers: { 'Authorization': `Bearer ${token}` } };
-
-      const response = await axios.get(
-        `http://localhost:5001/api/finished-products?barcode=${encodeURIComponent(barcodeInput.trim())}`,
-        config
-      );
+      const response = await api.get(`/finished-products?barcode=${encodeURIComponent(barcodeInput.trim())}`);
 
       if (response.data.success && response.data.data && response.data.data.length > 0) {
         const product = response.data.data[0];
@@ -195,20 +179,13 @@ const FinishedProducts = () => {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const config = { headers: { 'Authorization': `Bearer ${token}` } };
-
-      const response = await axios.post(
-        'http://localhost:5001/api/finished-products/update-stock',
-        {
-          productId: scannedProduct.id,
-          action: scanAction,
-          quantity: parseInt(scanQuantity),
-          reason: scanReason || (scanAction === 'MANUFACTURED' ? 'Manufacturing completed' : 'Product dispatched'),
-          userName: localStorage.getItem('userName') || 'Supervisor'
-        },
-        config
-      );
+      const response = await api.post('/finished-products/update-stock', {
+        productId: scannedProduct.id,
+        action: scanAction,
+        quantity: parseInt(scanQuantity),
+        reason: scanReason || (scanAction === 'MANUFACTURED' ? 'Manufacturing completed' : 'Product dispatched'),
+        userName: localStorage.getItem('userName') || 'Supervisor'
+      });
 
       if (response.data.success) {
         setScanSuccess(`✓ ${scanAction} successfully! New stock: ${response.data.newStock}`);

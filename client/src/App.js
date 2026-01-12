@@ -12,6 +12,8 @@ import Profile from './pages/Profile';
 import Layout from './components/Layout';
 import Invoice from './pages/Invoice';
 import FinishedProducts from './pages/FinishedProducts';
+import GSTUpload from './pages/GSTUpload';
+import EInvoice from './pages/EInvoice';
 
 const ProtectedRoute = ({ children, permission }) => {
   const { token, hasPermission } = useAuth();
@@ -131,6 +133,26 @@ const AppRoutes = () => {
           <ProtectedRoute permission="viewFinishedProducts">
             <Layout>
               <FinishedProducts />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/gst-upload"
+        element={
+          <ProtectedRoute permission="viewInventory">
+            <Layout>
+              <GSTUpload />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/einvoice"
+        element={
+          <ProtectedRoute permission="viewInventory">
+            <Layout>
+              <EInvoice />
             </Layout>
           </ProtectedRoute>
         }

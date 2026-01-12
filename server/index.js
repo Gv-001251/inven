@@ -15,6 +15,8 @@ const purchaseRoutes = require('./routes/purchase.routes');
 const finishedProductRoutes = require('./routes/finishedProducts.routes');
 const employeeRoutes = require('./routes/employees');
 const attendanceRoutes = require('./routes/attendance');
+const createGstRoutes = require('./routes/gst.routes');
+const createEinvoiceRoutes = require('./routes/einvoice.routes');
 
 const app = express();
 app.use(cors());
@@ -26,6 +28,7 @@ app.use('/api/purchase-requests', purchaseRoutes);
 app.use('/api/finished-products', finishedProductRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/attendance', attendanceRoutes);
+// GST routes are mounted after authenticate is defined (see below)
 
 const PORT = process.env.PORT || 5001;
 
@@ -50,7 +53,9 @@ const permissionsCatalog = {
   manageRoles: 'Manage role permissions and employees',
   viewNotifications: 'View notification center',
   manageNotifications: 'Manage notification state',
-  configureThresholds: 'Adjust inventory threshold alerts'
+  configureThresholds: 'Adjust inventory threshold alerts',
+  manageInvoices: 'Manage and upload GST invoices',
+  viewInvoices: 'View GST invoice records'
 };
 
 // Component inventory items with barcodes
@@ -565,6 +570,12 @@ function requirePermission(permission) {
     return next();
   };
 }
+
+// Mount GST routes (requires authenticate function)
+app.use('/api/gst', createGstRoutes(authenticate));
+
+// Mount E-Invoice routes (requires authenticate function)
+app.use('/api/einvoice', createEinvoiceRoutes(authenticate));
 
 // Routes
 

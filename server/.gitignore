@@ -13,9 +13,7 @@ pids
 *.pid.lock
 
 # Environment
-.env
-.env.test
-.env.production
 
 # Misc
 .DS_Store
+.env
