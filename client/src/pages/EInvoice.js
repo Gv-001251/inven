@@ -12,7 +12,8 @@ import {
     HiOutlineSearch,
     HiOutlineFilter,
     HiOutlineQrcode,
-    HiOutlineExclamationCircle
+    HiOutlineExclamationCircle,
+    HiOutlineTruck
 } from 'react-icons/hi';
 import api from '../utils/axios';
 import { useAuth } from '../context/AuthContext';
@@ -66,11 +67,12 @@ const INDIAN_STATES = [
     { code: '37', name: 'Andhra Pradesh' }
 ];
 
-const EInvoice = () => {
+
+const EInvoice = ({ defaultTab = 'sales' }) => {
     const { hasPermission, user } = useAuth();
 
     // Tab state
-    const [activeTab, setActiveTab] = useState('sales');
+    const [activeTab, setActiveTab] = useState(defaultTab);
 
     // Stats state
     const [stats, setStats] = useState({
@@ -107,17 +109,41 @@ const EInvoice = () => {
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [generatedIRN, setGeneratedIRN] = useState(null);
 
+    // E-Way Bill state
+    const [ewbInvoices, setEwbInvoices] = useState([]);
+    const [ewbLoading, setEwbLoading] = useState(false);
+    const [selectedEwbInvoice, setSelectedEwbInvoice] = useState(null);
+    const [ewbForm, setEwbForm] = useState({
+        distance: '',
+        transId: '',
+        transName: '',
+        transGstin: '',
+        vehicleNo: ''
+    });
+    const [generatingEwb, setGeneratingEwb] = useState(false);
+    const [showEwbModal, setShowEwbModal] = useState(false);
+    const [showEwbSuccessModal, setShowEwbSuccessModal] = useState(false);
+    const [generatedEwb, setGeneratedEwb] = useState(null);
+
     // Load history on mount
     useEffect(() => {
         loadHistory();
         loadStats();
     }, [selectedBusiness]);
 
+    // Load E-Way Bill invoices when tab changes
+    useEffect(() => {
+        if (activeTab === 'eway') {
+            loadEwbInvoices();
+        }
+    }, [activeTab, selectedBusiness]);
+
     const loadHistory = async () => {
         try {
             setHistoryLoading(true);
+            const gstin = selectedBusiness?.gstin || '';
             const { data } = await api.get('/einvoice/history', {
-                params: { gstin: selectedBusiness.gstin }
+                params: { gstin }
             });
             setHistory(data?.records || []);
         } catch (error) {
@@ -129,12 +155,155 @@ const EInvoice = () => {
 
     const loadStats = async () => {
         try {
+            const gstin = selectedBusiness?.gstin || '';
             const { data } = await api.get('/einvoice/stats', {
-                params: { gstin: selectedBusiness.gstin }
+                params: { gstin }
             });
             setStats(data || { pending: 0, successToday: 0, failed: 0 });
         } catch (error) {
             console.error('Failed to load stats:', error);
+        }
+    };
+
+    // Load invoices with IRN for E-Way Bill generation
+    const loadEwbInvoices = async () => {
+        try {
+            setEwbLoading(true);
+            const gstin = selectedBusiness?.gstin || '';
+            const { data } = await api.get('/einvoice/invoices-with-irn', {
+                params: { gstin }
+            });
+            setEwbInvoices(data?.records || []);
+        } catch (error) {
+            console.error('Failed to load EWB invoices:', error);
+        } finally {
+            setEwbLoading(false);
+        }
+    };
+
+    // Handle E-Way Bill form change
+    const handleEwbFormChange = (e) => {
+        const { name, value } = e.target;
+        setEwbForm(prev => ({ ...prev, [name]: value }));
+    };
+
+    // Generate E-Way Bill
+    const handleGenerateEwb = async (e) => {
+        e?.preventDefault();
+        setMessage(null);
+
+        if (!selectedEwbInvoice) {
+            setMessage({ type: 'error', text: 'Please select an invoice first.' });
+            return;
+        }
+
+        if (!ewbForm.distance || parseInt(ewbForm.distance) <= 0) {
+            setMessage({ type: 'error', text: 'Please enter a valid distance (in km).' });
+            return;
+        }
+
+        setGeneratingEwb(true);
+
+        try {
+            const payload = {
+                recordId: selectedEwbInvoice.id,
+                irn: selectedEwbInvoice.irn,
+                distance: parseInt(ewbForm.distance),
+                transId: ewbForm.transId || null,
+                transName: ewbForm.transName || null,
+                transGstin: ewbForm.transGstin || null,
+                vehicleNo: ewbForm.vehicleNo || null
+            };
+
+            const { data } = await api.post('/einvoice/generate-ewb', payload);
+
+            if (data.success) {
+                setGeneratedEwb({
+                    ...data,
+                    invoice: selectedEwbInvoice,
+                    distance: ewbForm.distance,
+                    vehicleNo: ewbForm.vehicleNo,
+                    transName: ewbForm.transName,
+                    transGstin: ewbForm.transGstin
+                });
+                setShowEwbSuccessModal(true);
+                setShowEwbModal(false);
+                setMessage({ type: 'success', text: 'E-Way Bill generated successfully!' });
+
+                // Refresh all data
+                loadEwbInvoices();
+                loadHistory();
+                loadStats();
+
+                // Auto-download EWB JSON
+                if (data.ewbNo) {
+                    const ewbData = JSON.stringify({
+                        ewbNo: data.ewbNo,
+                        ewbValidFrom: data.ewbValidFrom,
+                        ewbValidUpto: data.ewbValidUpto,
+                        irn: selectedEwbInvoice.irn,
+                        invoiceNumber: selectedEwbInvoice.invoice_number,
+                        distance: ewbForm.distance,
+                        vehicleNo: ewbForm.vehicleNo || null,
+                        transporter: ewbForm.transName || null
+                    }, null, 2);
+
+                    const blob = new Blob([ewbData], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `EWB-${data.ewbNo}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+
+                // Reset form
+                setEwbForm({
+                    distance: '',
+                    transId: '',
+                    transName: '',
+                    transGstin: '',
+                    vehicleNo: ''
+                });
+                setSelectedEwbInvoice(null);
+            } else {
+                setMessage({ type: 'error', text: data.message || 'Failed to generate E-Way Bill.' });
+            }
+        } catch (error) {
+            const errorMsg = error?.response?.data?.message || 'Failed to generate E-Way Bill.';
+            setMessage({ type: 'error', text: errorMsg });
+        } finally {
+            setGeneratingEwb(false);
+        }
+    };
+
+    // Open EWB modal from IRN success modal
+    const openEwbFromIrn = () => {
+        console.log('openEwbFromIrn called', generatedIRN);
+
+        // Use record if available, otherwise use invoiceData
+        const record = generatedIRN?.record;
+        const invoiceData = generatedIRN?.invoiceData;
+
+        if (generatedIRN?.irn) {
+            const ewbInvoice = {
+                id: record?.id || `temp-${Date.now()}`,
+                irn: generatedIRN.irn,
+                invoice_number: record?.invoice_number || invoiceData?.invoiceNumber,
+                supplier_name: record?.supplier_name || invoiceData?.supplierName || selectedBusiness?.name,
+                supplier_gstin: record?.supplier_gstin || invoiceData?.supplierGstin || selectedBusiness?.gstin,
+                recipient_name: record?.recipient_name || invoiceData?.recipientName,
+                recipient_gstin: record?.recipient_gstin || invoiceData?.recipientGstin,
+                total_amount: record?.total_amount || invoiceData?.totals?.invoiceTotal || 0
+            };
+
+            console.log('Setting EWB invoice:', ewbInvoice);
+            setSelectedEwbInvoice(ewbInvoice);
+            setShowSuccessModal(false);
+            setActiveTab('eway'); // Switch to E-Way Bill tab
+            setMessage({ type: 'info', text: 'Enter distance and generate E-Way Bill for this invoice.' });
+        } else {
+            setMessage({ type: 'error', text: 'IRN data not available. Please try from E-Way Bill tab.' });
         }
     };
 
@@ -260,8 +429,33 @@ const EInvoice = () => {
                 });
                 setShowSuccessModal(true);
                 setMessage({ type: 'success', text: 'IRN generated successfully!' });
+
+                // Refresh all data
                 loadHistory();
                 loadStats();
+                loadEwbInvoices();
+
+                // Auto-download JSON (optional)
+                if (data.irn && data.qrcode) {
+                    const jsonData = JSON.stringify({
+                        irn: data.irn,
+                        ackNo: data.ackNo || 'N/A',
+                        ackDate: data.ackDate || new Date().toISOString(),
+                        invoiceNumber: payload.invoiceNumber,
+                        invoiceDate: payload.invoiceDate,
+                        supplierGstin: payload.supplierGstin,
+                        recipientGstin: payload.recipientGstin,
+                        totalAmount: payload.totals?.invoiceTotal
+                    }, null, 2);
+
+                    const blob = new Blob([jsonData], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `IRN-${payload.invoiceNumber}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
 
                 // Reset form
                 setInvoiceForm(prev => ({
@@ -392,13 +586,13 @@ const EInvoice = () => {
                 </div>
             </div>
 
-            {/* Tabs */}
+            {/* Tabs - 3 Tab Layout */}
             <div className="bg-white rounded-t-2xl border-b border-gray-200">
                 <div className="flex overflow-x-auto">
                     {[
-                        { id: 'sales', label: 'Sales Bills' },
-                        { id: 'purchase', label: 'Purchase Bills' },
-                        { id: 'history', label: 'IRN History' }
+                        { id: 'sales', label: '📄 Generate IRN' },
+                        { id: 'eway', label: '🚚 E-Way Bill' },
+                        { id: 'history', label: '📋 History' }
                     ].map(tab => (
                         <button
                             key={tab.id}
@@ -420,7 +614,8 @@ const EInvoice = () => {
 
             {/* Tab Content */}
             <div className="bg-white rounded-b-2xl shadow-lg p-6">
-                {(activeTab === 'sales' || activeTab === 'purchase') && (
+                {/* Generate IRN Tab */}
+                {activeTab === 'sales' && (
                     <form onSubmit={handleGenerateIRN}>
                         {/* Invoice Type Toggle */}
                         <div className="mb-6">
@@ -704,6 +899,159 @@ const EInvoice = () => {
                     </form>
                 )}
 
+                {/* E-Way Bill Tab Content */}
+                {activeTab === 'eway' && (
+                    <div>
+                        <div className="mb-6">
+                            <h3 className="text-lg font-bold text-primary mb-2">Generate E-Way Bill</h3>
+                            <p className="text-sm text-primary/60">Select an invoice with IRN to generate E-Way Bill</p>
+                        </div>
+
+                        {/* Invoice Selection */}
+                        <div className="bg-gray-50 rounded-xl p-6 mb-6">
+                            <h4 className="text-sm font-medium text-primary mb-4">Select Invoice</h4>
+                            {ewbLoading ? (
+                                <div className="flex items-center justify-center py-8">
+                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                                    <span className="ml-2 text-primary/60">Loading invoices...</span>
+                                </div>
+                            ) : ewbInvoices.length === 0 ? (
+                                <div className="text-center py-8 text-primary/60">
+                                    <HiOutlineDocumentText className="text-4xl mx-auto mb-2" />
+                                    <p>No invoices with IRN available for E-Way Bill generation.</p>
+                                    <p className="text-sm mt-1">Generate an IRN first from Sales/Purchase tab.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3 max-h-64 overflow-y-auto">
+                                    {ewbInvoices.map(inv => (
+                                        <div
+                                            key={inv.id}
+                                            onClick={() => setSelectedEwbInvoice(inv)}
+                                            className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedEwbInvoice?.id === inv.id
+                                                ? 'border-primary bg-primary/5'
+                                                : 'border-gray-200 hover:border-primary/50'
+                                                }`}
+                                        >
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="font-medium text-primary">{inv.invoice_number}</p>
+                                                    <p className="text-sm text-primary/60">{inv.recipient_name || inv.recipient_gstin}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="font-medium text-primary">{formatCurrency(inv.total_amount)}</p>
+                                                    {inv.ewb_no ? (
+                                                        <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">EWB: {inv.ewb_no}</span>
+                                                    ) : (
+                                                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Pending EWB</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <p className="text-xs text-primary/40 mt-2 font-mono truncate">IRN: {inv.irn}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* E-Way Bill Form */}
+                        {selectedEwbInvoice && !selectedEwbInvoice.ewb_no && (
+                            <form onSubmit={handleGenerateEwb} className="bg-blue-50 rounded-xl p-6">
+                                <h4 className="text-sm font-medium text-primary mb-4">E-Way Bill Details</h4>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-primary mb-2">Distance (km) *</label>
+                                        <input
+                                            type="number"
+                                            name="distance"
+                                            value={ewbForm.distance}
+                                            onChange={handleEwbFormChange}
+                                            placeholder="e.g., 250"
+                                            min="1"
+                                            required
+                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-primary mb-2">Vehicle Number</label>
+                                        <input
+                                            type="text"
+                                            name="vehicleNo"
+                                            value={ewbForm.vehicleNo}
+                                            onChange={handleEwbFormChange}
+                                            placeholder="e.g., TN38AB1234"
+                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-primary mb-2">Transporter Name</label>
+                                        <input
+                                            type="text"
+                                            name="transName"
+                                            value={ewbForm.transName}
+                                            onChange={handleEwbFormChange}
+                                            placeholder="e.g., ABC Logistics"
+                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-primary mb-2">Transporter GSTIN</label>
+                                        <input
+                                            type="text"
+                                            name="transGstin"
+                                            value={ewbForm.transGstin}
+                                            onChange={handleEwbFormChange}
+                                            placeholder="e.g., 33AAABC1234C1ZB"
+                                            maxLength={15}
+                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-primary mb-2">Transporter ID</label>
+                                        <input
+                                            type="text"
+                                            name="transId"
+                                            value={ewbForm.transId}
+                                            onChange={handleEwbFormChange}
+                                            placeholder="e.g., TRN123"
+                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-end">
+                                    <button
+                                        type="submit"
+                                        disabled={generatingEwb}
+                                        className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-bold rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all shadow-lg shadow-blue-500/30 disabled:opacity-70 disabled:cursor-not-allowed"
+                                    >
+                                        {generatingEwb ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                                                Generating EWB...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <HiOutlineTruck className="text-xl" />
+                                                Generate E-Way Bill
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+
+                        {/* Selected invoice already has EWB */}
+                        {selectedEwbInvoice && selectedEwbInvoice.ewb_no && (
+                            <div className="bg-emerald-50 rounded-xl p-6 text-center">
+                                <HiOutlineCheckCircle className="text-4xl text-emerald-600 mx-auto mb-2" />
+                                <p className="text-emerald-700 font-medium">E-Way Bill already generated for this invoice</p>
+                                <p className="text-emerald-600 font-mono mt-2">EWB No: {selectedEwbInvoice.ewb_no}</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {activeTab === 'history' && (
                     <div>
                         {/* Search & Filter */}
@@ -877,13 +1225,19 @@ const EInvoice = () => {
                                             return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
                                         };
 
-                                        // Number to words helper
+                                        // Number to words helper - with safeguards against infinite recursion
                                         const numberToWords = (num) => {
+                                            // Safeguards
+                                            if (num === null || num === undefined || isNaN(num)) return 'Zero';
+                                            num = Math.floor(Math.abs(num)); // Handle negatives and decimals
+                                            if (num > 999999999999) return 'Amount Too Large'; // Limit to prevent stack overflow
+
                                             const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
                                                 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
                                             const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
                                             if (num === 0) return 'Zero';
-                                            if (num < 20) return ones[num];
+                                            if (num < 20) return ones[num] || 'Zero';
                                             if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? ' ' + ones[num % 10] : '');
                                             if (num < 1000) return ones[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' ' + numberToWords(num % 100) : '');
                                             if (num < 100000) return numberToWords(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + numberToWords(num % 1000) : '');
@@ -892,6 +1246,8 @@ const EInvoice = () => {
                                         };
 
                                         const amountInWords = (amt) => {
+                                            if (amt === null || amt === undefined || isNaN(amt)) return 'Indian Rupee Zero Only';
+                                            amt = Math.abs(amt || 0);
                                             const rupees = Math.floor(amt);
                                             const paise = Math.round((amt - rupees) * 100);
                                             let result = 'Indian Rupee ' + numberToWords(rupees);
@@ -1218,8 +1574,316 @@ const EInvoice = () => {
                                     💾 Download JSON
                                 </button>
                                 <button
+                                    onClick={openEwbFromIrn}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium"
+                                >
+                                    <HiOutlineTruck className="text-lg" />
+                                    🚚 Generate E-Way Bill
+                                </button>
+                                <button
                                     onClick={() => setShowSuccessModal(false)}
                                     className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-medium"
+                                >
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* E-Way Bill Quick Generate Modal */}
+            {showEwbModal && selectedEwbInvoice && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-8 animate-fade-in">
+                        <h2 className="text-2xl font-bold text-primary mb-4">🚚 Generate E-Way Bill</h2>
+                        <div className="mb-6">
+                            <p className="text-sm text-primary/60 mb-2">Invoice: <span className="font-medium text-primary">{selectedEwbInvoice.invoice_number}</span></p>
+                            <p className="text-sm text-primary/60">IRN: <span className="font-mono text-xs">{selectedEwbInvoice.irn?.substring(0, 30)}...</span></p>
+                        </div>
+
+                        <form onSubmit={handleGenerateEwb} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-primary mb-2">Distance (km) *</label>
+                                <input
+                                    type="number"
+                                    name="distance"
+                                    value={ewbForm.distance}
+                                    onChange={handleEwbFormChange}
+                                    placeholder="e.g., 250"
+                                    min="1"
+                                    required
+                                    autoFocus
+                                    className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-primary mb-2">Vehicle Number</label>
+                                    <input
+                                        type="text"
+                                        name="vehicleNo"
+                                        value={ewbForm.vehicleNo}
+                                        onChange={handleEwbFormChange}
+                                        placeholder="TN38AB1234"
+                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-primary mb-2">Transporter Name</label>
+                                    <input
+                                        type="text"
+                                        name="transName"
+                                        value={ewbForm.transName}
+                                        onChange={handleEwbFormChange}
+                                        placeholder="ABC Logistics"
+                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowEwbModal(false);
+                                        setSelectedEwbInvoice(null);
+                                        setEwbForm({ distance: '', transId: '', transName: '', transGstin: '', vehicleNo: '' });
+                                    }}
+                                    className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-medium"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={generatingEwb}
+                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium disabled:opacity-70"
+                                >
+                                    {generatingEwb ? (
+                                        <>
+                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                                            Generating...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <HiOutlineTruck className="text-lg" />
+                                            Generate EWB
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* E-Way Bill Success Modal */}
+            {showEwbSuccessModal && generatedEwb && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 animate-fade-in max-h-[90vh] overflow-y-auto">
+                        <div className="text-center space-y-6">
+                            {/* Success Header */}
+                            <div className="flex items-center justify-center gap-3 text-blue-600">
+                                <HiOutlineTruck className="text-4xl" />
+                                <h2 className="text-2xl font-bold">E-Way Bill Generated!</h2>
+                            </div>
+
+                            {/* EWB Number Display */}
+                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border-2 border-blue-200">
+                                <p className="text-sm text-gray-600 mb-2">E-Way Bill Number</p>
+                                <p className="text-2xl font-mono font-bold text-blue-900 tracking-wider">
+                                    {generatedEwb.ewbNo}
+                                </p>
+                            </div>
+
+                            {/* Validity Period */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200">
+                                    <p className="text-xs text-emerald-600 mb-1">Valid From</p>
+                                    <p className="font-medium text-emerald-800">{formatDate(generatedEwb.ewbValidFrom)}</p>
+                                </div>
+                                <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
+                                    <p className="text-xs text-amber-600 mb-1">Valid Until</p>
+                                    <p className="font-medium text-amber-800">{formatDate(generatedEwb.ewbValidUpto)}</p>
+                                </div>
+                            </div>
+
+                            {/* QR Code Display */}
+                            <div className="space-y-3">
+                                <h3 className="text-lg font-semibold text-gray-800">E-Way Bill QR Code</h3>
+                                {generatedEwb.ewbQrCode ? (
+                                    <div className="bg-white p-4 rounded-xl border-4 border-blue-200 inline-block shadow-lg">
+                                        <img
+                                            src={generatedEwb.ewbQrCode}
+                                            alt="EWB QR Code"
+                                            className="w-48 h-48 mx-auto"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="w-48 h-48 mx-auto bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 border-2 border-dashed border-gray-300">
+                                        <HiOutlineQrcode className="text-6xl" />
+                                    </div>
+                                )}
+                                <p className="text-xs text-gray-500">Scan to verify E-Way Bill</p>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                                <button
+                                    onClick={() => {
+                                        // Print combined IRN + EWB invoice A4 layout
+                                        const invoice = generatedEwb?.invoice || selectedEwbInvoice || {};
+                                        const ewb = generatedEwb || {};
+
+                                        const formatDate = (d) => {
+                                            if (!d) return '-';
+                                            const date = new Date(d);
+                                            return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                                        };
+
+                                        const printWindow = window.open('', '_blank');
+                                        printWindow.document.write(`
+                                            <!DOCTYPE html>
+                                            <html>
+                                            <head>
+                                                <title>E-Way Bill - ${ewb.ewbNo || 'EWB'}</title>
+                                                <style>
+                                                    @page { size: A4 portrait; margin: 10mm; }
+                                                    * { box-sizing: border-box; margin: 0; padding: 0; }
+                                                    body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; line-height: 1.4; }
+                                                    .container { max-width: 210mm; margin: 0 auto; padding: 10px; }
+                                                    table { border-collapse: collapse; width: 100%; }
+                                                    .header { text-align: center; margin-bottom: 15px; border: 2px solid #000; padding: 10px; }
+                                                    .section { border: 1px solid #000; margin-bottom: 10px; }
+                                                    .section-title { background: #f0f0f0; padding: 5px 10px; font-weight: bold; border-bottom: 1px solid #000; }
+                                                    .section-content { padding: 10px; }
+                                                    .qr-section { display: flex; justify-content: space-around; align-items: center; padding: 15px; }
+                                                    .qr-box { text-align: center; }
+                                                    .qr-box img { width: 100px; height: 100px; border: 1px solid #000; }
+                                                    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+                                                    .info-row { display: flex; margin-bottom: 5px; }
+                                                    .info-label { width: 120px; font-weight: bold; }
+                                                    .info-value { flex: 1; }
+                                                    .ewb-big { font-size: 24pt; font-weight: bold; text-align: center; color: #0066cc; margin: 10px 0; }
+                                                    .valid-box { display: flex; justify-content: center; gap: 40px; margin: 15px 0; }
+                                                    .valid-item { text-align: center; padding: 10px 20px; border: 1px solid #ccc; border-radius: 8px; }
+                                                    .valid-label { font-size: 9pt; color: #666; }
+                                                    .valid-value { font-size: 12pt; font-weight: bold; }
+                                                    @media print { body { -webkit-print-color-adjust: exact !important; } }
+                                                </style>
+                                            </head>
+                                            <body>
+                                                <div class="container">
+                                                    <!-- Header -->
+                                                    <div class="header">
+                                                        <div style="font-size: 18pt; font-weight: bold; margin-bottom: 5px;">E-WAY BILL</div>
+                                                        <div style="font-size: 10pt; color: #666;">Generated via NIC Portal</div>
+                                                    </div>
+                                                    
+                                                    <!-- EWB Number -->
+                                                    <div class="section">
+                                                        <div class="ewb-big">${ewb.ewbNo || 'EWB Number'}</div>
+                                                        <div class="valid-box">
+                                                            <div class="valid-item">
+                                                                <div class="valid-label">Valid From</div>
+                                                                <div class="valid-value" style="color: #22c55e;">${formatDate(ewb.ewbValidFrom)}</div>
+                                                            </div>
+                                                            <div class="valid-item">
+                                                                <div class="valid-label">Valid Until</div>
+                                                                <div class="valid-value" style="color: #ef4444;">${formatDate(ewb.ewbValidUpto)}</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- QR Codes Section -->
+                                                    <div class="section">
+                                                        <div class="section-title">Verification QR Codes</div>
+                                                        <div class="qr-section">
+                                                            <div class="qr-box">
+                                                                ${invoice.irn && generatedIRN?.qrcode ? `<img src="${generatedIRN.qrcode}" alt="IRN QR"/>` : '<div style="width: 100px; height: 100px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center;">IRN QR</div>'}
+                                                                <div style="margin-top: 5px; font-weight: bold;">IRN QR</div>
+                                                                <div style="font-size: 8pt; color: #666;">Scan for e-Invoice</div>
+                                                            </div>
+                                                            <div class="qr-box">
+                                                                ${ewb.ewbQrCode ? `<img src="${ewb.ewbQrCode}" alt="EWB QR"/>` : '<div style="width: 100px; height: 100px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center;">EWB QR</div>'}
+                                                                <div style="margin-top: 5px; font-weight: bold;">E-Way Bill QR</div>
+                                                                <div style="font-size: 8pt; color: #666;">Scan for EWB</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- Document Details -->
+                                                    <div class="section">
+                                                        <div class="section-title">Document Details</div>
+                                                        <div class="section-content grid-2">
+                                                            <div>
+                                                                <div class="info-row"><span class="info-label">Doc Type:</span><span class="info-value">Tax Invoice</span></div>
+                                                                <div class="info-row"><span class="info-label">Doc No:</span><span class="info-value">${invoice.invoice_number || 'N/A'}</span></div>
+                                                                <div class="info-row"><span class="info-label">Doc Date:</span><span class="info-value">${formatDate(invoice.invoice_date)}</span></div>
+                                                            </div>
+                                                            <div>
+                                                                <div class="info-row"><span class="info-label">IRN:</span><span class="info-value" style="font-size: 8pt; word-break: break-all;">${invoice.irn || 'N/A'}</span></div>
+                                                                <div class="info-row"><span class="info-label">Value:</span><span class="info-value" style="font-weight: bold;">₹ ${(invoice.total_amount || 0).toLocaleString('en-IN')}</span></div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- From / To Details -->
+                                                    <div class="section">
+                                                        <div class="section-title">Consignment Details</div>
+                                                        <div class="section-content grid-2">
+                                                            <div style="border-right: 1px solid #ccc; padding-right: 10px;">
+                                                                <div style="font-weight: bold; margin-bottom: 5px; color: #0066cc;">FROM (Consignor)</div>
+                                                                <div class="info-row"><span class="info-label">Name:</span><span class="info-value">${invoice.supplier_name || selectedBusiness?.name || 'Breeze Techniques'}</span></div>
+                                                                <div class="info-row"><span class="info-label">GSTIN:</span><span class="info-value">${invoice.supplier_gstin || selectedBusiness?.gstin || '33AABCT1234A1Z5'}</span></div>
+                                                                <div class="info-row"><span class="info-label">State:</span><span class="info-value">Tamil Nadu (33)</span></div>
+                                                            </div>
+                                                            <div style="padding-left: 10px;">
+                                                                <div style="font-weight: bold; margin-bottom: 5px; color: #dc2626;">TO (Consignee)</div>
+                                                                <div class="info-row"><span class="info-label">Name:</span><span class="info-value">${invoice.recipient_name || 'N/A'}</span></div>
+                                                                <div class="info-row"><span class="info-label">GSTIN:</span><span class="info-value">${invoice.recipient_gstin || 'N/A'}</span></div>
+                                                                <div class="info-row"><span class="info-label">State:</span><span class="info-value">-</span></div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- Transport Details -->
+                                                    <div class="section">
+                                                        <div class="section-title">Transport Details</div>
+                                                        <div class="section-content grid-2">
+                                                            <div>
+                                                                <div class="info-row"><span class="info-label">Mode:</span><span class="info-value">Road</span></div>
+                                                                <div class="info-row"><span class="info-label">Distance:</span><span class="info-value">${ewb.distance || ewbForm?.distance || '-'} km</span></div>
+                                                                <div class="info-row"><span class="info-label">Vehicle No:</span><span class="info-value">${ewb.vehicleNo || ewbForm?.vehicleNo || '-'}</span></div>
+                                                            </div>
+                                                            <div>
+                                                                <div class="info-row"><span class="info-label">Transporter:</span><span class="info-value">${ewb.transName || ewbForm?.transName || '-'}</span></div>
+                                                                <div class="info-row"><span class="info-label">Trans GSTIN:</span><span class="info-value">${ewb.transGstin || ewbForm?.transGstin || '-'}</span></div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <!-- Footer -->
+                                                    <div style="margin-top: 20px; text-align: center; font-size: 9pt; color: #666;">
+                                                        <p>This is a computer generated document. No signature required.</p>
+                                                        <p>Generated by Breeze Techniques Inventory System</p>
+                                                    </div>
+                                                </div>
+                                            </body>
+                                            </html>
+                                        `);
+                                        printWindow.document.close();
+                                        printWindow.focus();
+                                        setTimeout(() => printWindow.print(), 300);
+                                    }}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-blue-600 text-blue-600 rounded-xl hover:bg-blue-50 transition-colors font-medium"
+                                >
+                                    <HiOutlinePrinter className="text-lg" />
+                                    🖨️ Print Combined Invoice
+                                </button>
+                                <button
+                                    onClick={() => setShowEwbSuccessModal(false)}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium"
                                 >
                                     Close
                                 </button>

@@ -128,6 +128,67 @@ async function initializeData() {
   try {
     console.log('✓ Initializing Supabase data...');
 
+    // Create einvoice_records table if not exists
+    try {
+      const { error: tableCheckError } = await supabase.from('einvoice_records').select('id').limit(1);
+
+      if (tableCheckError && tableCheckError.code === 'PGRST205') {
+        console.log('Creating einvoice_records table...');
+        // Table doesn't exist, create it via SQL
+        const { error: createError } = await supabase.rpc('exec_sql', {
+          sql_query: `
+            CREATE TABLE IF NOT EXISTS einvoice_records (
+              id UUID PRIMARY KEY,
+              invoice_type VARCHAR(20),
+              invoice_number VARCHAR(50),
+              invoice_date DATE,
+              supplier_name VARCHAR(255),
+              supplier_gstin VARCHAR(15),
+              recipient_name VARCHAR(255),
+              recipient_gstin VARCHAR(15),
+              total_amount DECIMAL(15,2),
+              taxable_amount DECIMAL(15,2),
+              cgst DECIMAL(15,2),
+              sgst DECIMAL(15,2),
+              igst DECIMAL(15,2),
+              irn TEXT,
+              qrcode TEXT,
+              signed_invoice TEXT,
+              status VARCHAR(20) DEFAULT 'pending',
+              items JSONB,
+              ewb_no VARCHAR(50),
+              ewb_valid_from TIMESTAMP,
+              ewb_valid_upto TIMESTAMP,
+              ewb_qrcode TEXT,
+              ewb_distance INTEGER,
+              ewb_vehicle_no VARCHAR(20),
+              ewb_transporter_id VARCHAR(50),
+              ewb_transporter_name VARCHAR(255),
+              ewb_transporter_gstin VARCHAR(15),
+              ewb_status VARCHAR(20),
+              ewb_generated_at TIMESTAMP,
+              ewb_generated_by UUID,
+              generated_by UUID,
+              generated_by_name VARCHAR(255),
+              generated_at TIMESTAMP,
+              created_at TIMESTAMP DEFAULT NOW()
+            );
+          `
+        });
+
+        if (createError) {
+          console.log('Note: Could not auto-create einvoice_records table. Please create it manually in Supabase SQL Editor.');
+          console.log('SQL: CREATE TABLE einvoice_records (...) - See docs for full schema.');
+        } else {
+          console.log('✓ einvoice_records table created');
+        }
+      } else {
+        console.log('✓ einvoice_records table exists');
+      }
+    } catch (e) {
+      console.log('Note: einvoice_records table check failed:', e.message);
+    }
+
     // Seed inventory items if needed
     await inventoryStore.seedInventoryItems(componentDefs);
 
