@@ -15,6 +15,7 @@ import {
 } from 'react-icons/hi';
 import api from '../utils/axios';
 import { useAuth } from '../context/AuthContext';
+import CubeLoader from '../components/CubeLoader';
 
 const Inventory = () => {
   const { hasPermission } = useAuth();
@@ -193,6 +194,11 @@ const Inventory = () => {
     </div>
   );
 
+  // Show CubeLoader while loading
+  if (loading) {
+    return <CubeLoader />;
+  }
+
   return (
     <div className="min-h-screen bg-mint p-8 font-sans" onClick={() => { setShowSortMenu(false); setShowFilterMenu(false); }}>
 
@@ -240,17 +246,39 @@ const Inventory = () => {
                   recentTransactions.map((tx, idx) => {
                     // Mocking some data fields
                     const mockId = `COMP-${String(idx + 1).padStart(3, '0')}`;
+                    const itemName = tx.itemName || tx.item_name;
+
+                    // Find the full item data from inventory
+                    const fullItem = inventory.items.find(
+                      item => item.name === itemName || item.barcode === tx.barcode
+                    );
 
                     return (
-                      <TableRow key={idx} index={idx}>
-                        <td className="p-4 text-center"><div className="w-4 h-4 border border-white/50 rounded mx-auto cursor-pointer" /></td>
+                      <TableRow
+                        key={idx}
+                        index={idx}
+                        onClick={() => {
+                          if (fullItem) {
+                            handleProductClick(fullItem);
+                          } else {
+                            // Fallback: create a basic item object from transaction data
+                            handleProductClick({
+                              name: itemName,
+                              stock: tx.quantity,
+                              threshold: 10,
+                              category: 'Component'
+                            });
+                          }
+                        }}
+                      >
+                        <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}><div className="w-4 h-4 border border-white/50 rounded mx-auto cursor-pointer" /></td>
                         <td className="p-4">{mockId}</td>
-                        <td className="p-4 font-bold">{tx.itemName || tx.item_name}</td>
+                        <td className="p-4 font-bold">{itemName}</td>
                         <td className="p-4">Component</td>
                         <td className="p-4 text-center">{tx.quantity}</td>
                         <td className="p-4">$300</td>
                         <td className="p-4">{new Date(tx.timestamp).toLocaleDateString()}</td>
-                        <td className="p-4 text-center"><HiOutlineDotsVertical className="text-lg cursor-pointer hover:text-white/70" /></td>
+                        <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}><HiOutlineDotsVertical className="text-lg cursor-pointer hover:text-white/70" /></td>
                       </TableRow>
                     );
                   })
@@ -308,7 +336,10 @@ const Inventory = () => {
               )}
             </div>
 
-            <button className="flex items-center gap-2 text-primary font-bold text-sm hover:opacity-80">
+            <button
+              onClick={() => setShowStockModal(true)}
+              className="flex items-center gap-2 text-primary font-bold text-sm hover:opacity-80"
+            >
               <HiOutlinePlus className="text-lg" /> Add Item
             </button>
           </div>

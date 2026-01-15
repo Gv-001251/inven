@@ -28,7 +28,11 @@ module.exports = {
           custom: '#10B981', // Accents
           dim: '#34D399'
         }
-      }
+      },
+      fontFamily: {
+        sans: ['Gilroy', 'system-ui', '-apple-system', 'sans-serif'],
+        gilroy: ['Gilroy', 'sans-serif'],
+      },
     },
   },
   plugins: [],

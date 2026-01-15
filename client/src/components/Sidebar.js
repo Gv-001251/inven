@@ -25,7 +25,7 @@ const Sidebar = () => {
     { path: '/inventory', icon: HiOutlineClipboardList, label: 'Inventory', permission: 'viewInventory' },
     { path: '/finished-products', icon: HiOutlineCube, label: 'Finished Products', permission: 'viewFinishedProducts' },
     { path: '/attendance', icon: HiOutlineUsers, label: 'Attendance', permission: 'viewAttendance' },
-    { path: '/invoice', icon: HiOutlineDocumentText, label: 'Invoice', permission: 'viewInvoices' },
+    { path: '/invoice', icon: HiOutlineDocumentText, label: 'Invoice', permission: 'newInvoice' },
     { path: '/purchase', icon: HiOutlineShoppingCart, label: 'Purchase', permission: 'createPurchaseRequest' },
     { path: '/gst-upload', icon: HiOutlineDocumentReport, label: 'GST Upload', permission: 'viewInventory' },
     { path: '/einvoice', icon: HiOutlineReceiptTax, label: 'E-Invoice', permission: 'viewInventory' },

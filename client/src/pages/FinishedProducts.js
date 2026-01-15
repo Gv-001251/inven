@@ -12,6 +12,7 @@ import {
   HiOutlineDotsVertical
 } from 'react-icons/hi';
 import { FaBarcode } from 'react-icons/fa';
+import CubeLoader from '../components/CubeLoader';
 
 const FinishedProducts = () => {
   // --- State Management ---
@@ -224,7 +225,7 @@ const FinishedProducts = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-mint">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <CubeLoader />
       </div>
     );
   }
@@ -390,7 +391,19 @@ const FinishedProducts = () => {
                 </thead>
                 <tbody className="text-sm text-gray-600">
                   {filteredProducts.length === 0 ? (
-                    <tr><td colSpan="7" className="p-8 text-center text-gray-400">No products found.</td></tr>
+                    <tr>
+                      <td colSpan="7" className="p-8 text-center">
+                        <div className="flex flex-col items-center justify-center py-8">
+                          <img
+                            src="/assets/empty-bro.png"
+                            alt="No products found"
+                            className="w-48 h-48 object-contain mb-4"
+                          />
+                          <p className="text-gray-400 text-sm">No products found.</p>
+                        </div>
+                      </td>
+                    </tr>
+
                   ) : (
                     filteredProducts.map((product, idx) => (
                       <tr key={product.id} className={`border-b border-gray-50 last:border-0 hover:bg-emerald-50/30 transition-colors ${idx % 2 === 0 ? 'bg-mint/20' : 'bg-white'}`}>
@@ -470,7 +483,18 @@ const FinishedProducts = () => {
                 </thead>
                 <tbody className="text-sm text-gray-600">
                   {transactions.length === 0 ? (
-                    <tr><td colSpan="7" className="p-8 text-center text-gray-400">No transactions recorded.</td></tr>
+                    <tr>
+                      <td colSpan="7" className="p-8 text-center">
+                        <div className="flex flex-col items-center justify-center py-8">
+                          <img 
+                            src="/assets/empty-bro.png"
+                            alt="No products found"
+                            className="w-48 h-48 object-contain mb-4"
+                          />
+                          <p className="text-gray-400 text-sm">No transactions found.</p>
+                        </div>
+                      </td>
+                    </tr>
                   ) : (
                     transactions.slice(0, 10).map((txn, idx) => {
                       const status = getActionColorDetails(txn.action);

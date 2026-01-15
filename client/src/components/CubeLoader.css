@@ -1,0 +1,248 @@
+/* CubeLoader.css - 3D Cube Grid Loader Animation */
+
+/* Variables converted from SCSS - Using Green/Teal theme */
+:root {
+    --cube-edge: 2.75em;
+    --cube-dist: 3.5em;
+    --cube-time: 3.15s;
+    --cube-color-1: #0C3834;
+    /* Deep Green (Top) */
+    --cube-color-2: #115e59;
+    /* Teal (Right) */
+    --cube-color-3: #10B981;
+    /* Emerald (Left - Accent) */
+    --cube-color-light: #0f766e;
+    --loader-bg: #F5FBF9;
+    /* Mint background */
+}
+
+.cube-loader-wrapper {
+    position: fixed;
+    top: 0;
+    left: 16rem;
+    /* Offset for sidebar width (w-64) */
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--loader-bg);
+    z-index: 40;
+    /* Lower than sidebar z-50 */
+}
+
+.cube-grid {
+    position: relative;
+    width: 12em;
+    height: 6.25em;
+    transform-style: preserve-3d;
+    transform: rotateX(-35deg) rotateY(-45deg);
+}
+
+.cube {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-style: preserve-3d;
+}
+
+/* Position each cube in the 4x4 grid */
+.cube:nth-child(1) {
+    transform: translate3d(calc(-1.5 * var(--cube-dist)), 0, calc(-1.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(2) {
+    transform: translate3d(calc(-0.5 * var(--cube-dist)), 0, calc(-1.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(3) {
+    transform: translate3d(calc(0.5 * var(--cube-dist)), 0, calc(-1.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(4) {
+    transform: translate3d(calc(1.5 * var(--cube-dist)), 0, calc(-1.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(5) {
+    transform: translate3d(calc(-1.5 * var(--cube-dist)), 0, calc(-0.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(6) {
+    transform: translate3d(calc(-0.5 * var(--cube-dist)), 0, calc(-0.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(7) {
+    transform: translate3d(calc(0.5 * var(--cube-dist)), 0, calc(-0.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(8) {
+    transform: translate3d(calc(1.5 * var(--cube-dist)), 0, calc(-0.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(9) {
+    transform: translate3d(calc(-1.5 * var(--cube-dist)), 0, calc(0.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(10) {
+    transform: translate3d(calc(-0.5 * var(--cube-dist)), 0, calc(0.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(11) {
+    transform: translate3d(calc(0.5 * var(--cube-dist)), 0, calc(0.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(12) {
+    transform: translate3d(calc(1.5 * var(--cube-dist)), 0, calc(0.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(13) {
+    transform: translate3d(calc(-1.5 * var(--cube-dist)), 0, calc(1.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(14) {
+    transform: translate3d(calc(-0.5 * var(--cube-dist)), 0, calc(1.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(15) {
+    transform: translate3d(calc(0.5 * var(--cube-dist)), 0, calc(1.5 * var(--cube-dist)));
+}
+
+.cube:nth-child(16) {
+    transform: translate3d(calc(1.5 * var(--cube-dist)), 0, calc(1.5 * var(--cube-dist)));
+}
+
+/* Animation delays for wave effect */
+.cube:nth-child(1) .lifter,
+.cube:nth-child(1) .cube__face--1 {
+    animation-delay: calc(0 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(2) .lifter,
+.cube:nth-child(2) .cube__face--1 {
+    animation-delay: calc(1 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(3) .lifter,
+.cube:nth-child(3) .cube__face--1 {
+    animation-delay: calc(2 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(4) .lifter,
+.cube:nth-child(4) .cube__face--1 {
+    animation-delay: calc(3 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(5) .lifter,
+.cube:nth-child(5) .cube__face--1 {
+    animation-delay: calc(1 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(6) .lifter,
+.cube:nth-child(6) .cube__face--1 {
+    animation-delay: calc(2 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(7) .lifter,
+.cube:nth-child(7) .cube__face--1 {
+    animation-delay: calc(3 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(8) .lifter,
+.cube:nth-child(8) .cube__face--1 {
+    animation-delay: calc(4 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(9) .lifter,
+.cube:nth-child(9) .cube__face--1 {
+    animation-delay: calc(2 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(10) .lifter,
+.cube:nth-child(10) .cube__face--1 {
+    animation-delay: calc(3 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(11) .lifter,
+.cube:nth-child(11) .cube__face--1 {
+    animation-delay: calc(4 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(12) .lifter,
+.cube:nth-child(12) .cube__face--1 {
+    animation-delay: calc(5 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(13) .lifter,
+.cube:nth-child(13) .cube__face--1 {
+    animation-delay: calc(3 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(14) .lifter,
+.cube:nth-child(14) .cube__face--1 {
+    animation-delay: calc(4 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(15) .lifter,
+.cube:nth-child(15) .cube__face--1 {
+    animation-delay: calc(5 * 0.0466 * var(--cube-time));
+}
+
+.cube:nth-child(16) .lifter,
+.cube:nth-child(16) .cube__face--1 {
+    animation-delay: calc(6 * 0.0466 * var(--cube-time));
+}
+
+.lifter {
+    position: absolute;
+    transform-style: preserve-3d;
+    transform-origin: 0 calc(0.5 * var(--cube-edge));
+    transform: scaleY(0);
+    animation: cubeLifter calc(var(--cube-time) / 4) cubic-bezier(0.5, 0.1, 0.5, 0.9) alternate infinite;
+}
+
+.cube__face {
+    position: absolute;
+    width: var(--cube-edge);
+    height: var(--cube-edge);
+    margin: calc(-0.5 * var(--cube-edge));
+    backface-visibility: hidden;
+}
+
+/* Top face */
+.cube__face--1 {
+    background: var(--cube-color-1);
+    transform: rotateX(90deg) translateZ(calc(0.5 * var(--cube-edge)));
+    animation: cubeFaceTop calc(var(--cube-time) / 4) cubic-bezier(0.4, 0.2, 0.4, 0.6) alternate infinite;
+}
+
+/* Right face */
+.cube__face--2 {
+    background: var(--cube-color-2);
+    transform: rotateY(90deg) translateZ(calc(0.5 * var(--cube-edge)));
+}
+
+/* Left/Front face */
+.cube__face--3 {
+    background: var(--cube-color-3);
+    transform: translateZ(calc(0.5 * var(--cube-edge)));
+}
+
+@keyframes cubeLifter {
+    0% {
+        transform: scaleY(0);
+    }
+
+    100% {
+        transform: scaleY(0.533);
+    }
+}
+
+@keyframes cubeFaceTop {
+    0% {
+        background: var(--cube-color-light);
+    }
+
+    100% {
+        background: var(--cube-color-1);
+    }
+}

@@ -10,6 +10,7 @@ import {
 } from 'react-icons/hi';
 import api from '../utils/axios'; // ✅ Changed from 'axios' to '../utils/axios'
 import { useAuth } from '../context/AuthContext';
+import CubeLoader from '../components/CubeLoader';
 
 
 const Attendance = () => {
@@ -271,7 +272,7 @@ const Attendance = () => {
 
 
   if (loading) {
-    return <div style={styles.container}>Loading attendance data...</div>;
+    return <CubeLoader />;
   }
 
 

@@ -12,6 +12,7 @@ import {
 } from 'react-icons/hi';
 import api from '../utils/axios';
 import { useAuth } from '../context/AuthContext';
+import CubeLoader from '../components/CubeLoader';
 
 const GSTUpload = () => {
     const { hasPermission, user } = useAuth();
@@ -221,7 +222,7 @@ const GSTUpload = () => {
     if (loading && records.length === 0) {
         return (
             <div className="flex items-center justify-center h-screen bg-mint">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                <CubeLoader />
             </div>
         );
     }
@@ -519,9 +520,16 @@ const GSTUpload = () => {
                             <tbody className="text-sm">
                                 {filteredRecords.length === 0 ? (
                                     <tr>
-                                        <td colSpan="9" className="p-8 text-center text-white/50">
-                                            {loading ? 'Loading records...' : 'No records found.'}
-                                        </td>
+                                    <td colSpan="10" className="p-8 text-center">
+                                        <div className="flex flex-col items-center justify-center py-8">
+                                        <img 
+                                            src="/assets/empty-bro.png"
+                                            alt="No products found"
+                                            className="w-48 h-48 object-contain mb-4"
+                                        />
+                                        <p className="text-gray-400 text-sm">No products found.</p>
+                                        </div>
+                                    </td>
                                     </tr>
                                 ) : (
                                     filteredRecords.map((record, idx) => (

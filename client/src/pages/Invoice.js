@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '../utils/axios';
 import {
   HiOutlineDownload,
@@ -19,15 +19,53 @@ const Invoice = () => {
     discount: 0,
     taxPercentage: 18,
     currency: 'INR',
-    invoiceNumber: 'AUTO-GEN-' + Math.floor(Math.random() * 10000), // Mock auto-gen for display
+    invoiceNumber: 'INV-0001', // Will be updated by useEffect
     notes: 'Thank you for your business. Please make payment within 7 days.'
   });
 
   const [loading, setLoading] = useState(false);
   const [invoices, setInvoices] = useState([]);
-  const [activeTab, setActiveTab] = useState('list'); // Default to list to show the empty state requested
+  const [activeTab, setActiveTab] = useState('create'); // Default to list to show the empty state requested
 
-  // See handleTabChange to ensure we fetch invoices when switching to list
+  // Generate sequential invoice number
+  const generateNextInvoiceNumber = async () => {
+    try {
+      const response = await api.get('/invoices/list');
+      const existingInvoices = response.data.data || [];
+
+      if (existingInvoices.length === 0) {
+        return 'INV-0001';
+      }
+
+      // Find the highest invoice number
+      let maxNumber = 0;
+      existingInvoices.forEach(inv => {
+        const invNum = inv.invoiceNumber || inv.invoice_number || '';
+        const match = invNum.match(/INV-(\d+)/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxNumber) maxNumber = num;
+        }
+      });
+
+      // Generate next number with padding
+      const nextNumber = maxNumber + 1;
+      return `INV-${String(nextNumber).padStart(4, '0')}`;
+    } catch (error) {
+      console.error('Error fetching invoice count:', error);
+      // Fallback: use timestamp-based number
+      return `INV-${String(Date.now()).slice(-4)}`;
+    }
+  };
+
+  // Fetch next invoice number on component mount
+  useEffect(() => {
+    const initInvoiceNumber = async () => {
+      const nextNumber = await generateNextInvoiceNumber();
+      setFormData(prev => ({ ...prev, invoiceNumber: nextNumber }));
+    };
+    initInvoiceNumber();
+  }, []);
 
   const handleAddItem = () => {
     setFormData({
@@ -80,6 +118,8 @@ const Invoice = () => {
 
       alert(`Invoice ${type === 'send' ? 'sent' : 'saved'} successfully!`);
 
+      // Generate next invoice number and reset form
+      const nextNumber = await generateNextInvoiceNumber();
       setFormData({
         customerName: '',
         customerPhone: '',
@@ -90,7 +130,7 @@ const Invoice = () => {
         discount: 0,
         taxPercentage: 18,
         currency: 'INR',
-        invoiceNumber: 'AUTO-GEN-' + Math.floor(Math.random() * 10000),
+        invoiceNumber: nextNumber,
         notes: 'Thank you for your business. Please make payment within 7 days.'
       });
 
@@ -470,7 +510,7 @@ const Invoice = () => {
                              Replace this URL with the uploaded illustration.
                          */}
                 <img
-                  src="https://illustrations.popsy.co/emerald/documents.svg"
+                  src="/assets/Invoice-rafiki.png"
                   alt="No Invoices"
                   className="relative w-64 h-64 object-contain opacity-90"
                 />

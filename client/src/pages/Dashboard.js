@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import api from '../utils/axios';
 import { useAuth } from '../context/AuthContext';
 import EmployeeDashboard from './EmployeeDashboard';
-import { HiOutlineArrowRight, HiOutlineArrowUp, HiOutlineCalendar } from 'react-icons/hi';
+import { HiOutlineArrowRight, HiOutlineArrowUp, HiOutlineCalendar, HiOutlineQrcode, HiOutlineChevronDown, HiOutlineX } from 'react-icons/hi';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
+import CubeLoader from '../components/CubeLoader';
 
 const Dashboard = () => {
   const { hasPermission, user } = useAuth();
@@ -38,6 +39,13 @@ const Dashboard = () => {
     topProducts: []
   });
   const [loading, setLoading] = useState(true);
+
+  // Stock Modal States
+  const [showStockModal, setShowStockModal] = useState(false);
+  const [stockForm, setStockForm] = useState({ barcode: '', action: 'IN', quantity: 1, reason: '' });
+  const [stockProcessing, setStockProcessing] = useState(false);
+  const [stockMessage, setStockMessage] = useState(null);
+  const [lookedUpItem, setLookedUpItem] = useState(null);
 
   const fetchDashboardData = async () => {
     console.log('📊 Fetching dashboard data...');
@@ -107,6 +115,46 @@ const Dashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Stock Modal Handlers
+  const handleStockFormChange = (e) => {
+    const { name, value } = e.target;
+    setStockForm(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleLookup = async (query) => {
+    if (!query || query.trim() === '') {
+      setLookedUpItem(null);
+      return;
+    }
+    try {
+      const { data } = await api.get(`/inventory/lookup?q=${encodeURIComponent(query.trim())}`);
+      setLookedUpItem(data.item);
+    } catch (error) {
+      setLookedUpItem(null);
+    }
+  };
+
+  const handleStockSubmit = async (e) => {
+    e.preventDefault();
+    setStockProcessing(true);
+    setStockMessage(null);
+    try {
+      await api.post('/inventory/scan', { ...stockForm, quantity: Number(stockForm.quantity) });
+      setStockMessage({ type: 'success', text: 'Inventory updated successfully.' });
+      setStockForm({ barcode: '', action: stockForm.action, quantity: 1, reason: '' });
+      setLookedUpItem(null);
+      fetchDashboardData();
+      setTimeout(() => {
+        setShowStockModal(false);
+        setStockMessage(null);
+      }, 1500);
+    } catch (error) {
+      setStockMessage({ type: 'error', text: error?.response?.data?.message || 'Unable to process scan.' });
+    } finally {
+      setStockProcessing(false);
+    }
+  };
+
   if (isEmployee) {
     return <EmployeeDashboard />;
   }
@@ -121,7 +169,7 @@ const Dashboard = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <CubeLoader />
       </div>
     );
   }
@@ -133,7 +181,10 @@ const Dashboard = () => {
         <h1 className="text-3xl font-extrabold text-primary">Dashboard</h1>
 
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-transparent border border-primary/30 rounded-full text-sm font-medium text-primary hover:bg-white transition-colors">
+          <button
+            onClick={() => setShowStockModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-transparent border border-primary/30 rounded-full text-sm font-medium text-primary hover:bg-white transition-colors"
+          >
             <span>+</span> Add Item
           </button>
           <button className="flex items-center gap-2 px-4 py-2 bg-transparent border border-primary/30 rounded-full text-sm font-medium text-primary hover:bg-white transition-colors">
@@ -217,6 +268,25 @@ const Dashboard = () => {
             </div>
           </div>
 
+          {/* Low Stocks List - Moved here from right column */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-primary/5">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-primary">Low Stocks</h3>
+            </div>
+            <div className="flex flex-col gap-3">
+              {lowStockList.length === 0 ? (
+                <p className="text-sm text-gray-400">No items low on stock.</p>
+              ) : (
+                lowStockList.slice(0, 5).map((item, idx) => (
+                  <div key={idx} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+                    <span className="text-sm font-medium text-gray-700">{item.name}</span>
+                    <span className="text-sm font-bold text-red-500 bg-red-50 px-2 py-1 rounded-md">{item.quantity} / {item.threshold}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
         </div>
 
         {/* Right Column (Charts & Tables) - Span 8 */}
@@ -251,57 +321,35 @@ const Dashboard = () => {
             </ResponsiveContainer>
           </div>
 
-          {/* Bottom Split: Low Stock & Recent Sales */}
-          <div className="grid grid-cols-12 gap-6">
-            {/* Low Stocks List - Span 5 */}
-            <div className="col-span-12 lg:col-span-5 bg-white rounded-2xl p-6 shadow-sm border border-primary/5">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-primary">Low Stocks</h3>
+          {/* Recent Sales Table - Now Full Width */}
+          <div>
+            <h3 className="text-xl font-bold text-primary mb-4">Recent Sales</h3>
+            <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-primary/5">
+              <div className="bg-primary text-white grid grid-cols-5 px-6 py-4 text-xs font-semibold uppercase tracking-wider">
+                <div>ID</div>
+                <div className="col-span-2">Item Name</div>
+                <div>Status</div>
+                <div className="text-right">Qty</div>
               </div>
-              <div className="flex flex-col gap-3">
-                {lowStockList.length === 0 ? (
-                  <p className="text-sm text-gray-400">No items low on stock.</p>
+              <div className="flex flex-col">
+                {recentTransactions.length === 0 ? (
+                  <div className="p-6 text-center text-gray-400 text-sm">No recent transactions.</div>
                 ) : (
-                  lowStockList.slice(0, 5).map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
-                      <span className="text-sm font-medium text-gray-700">{item.name}</span>
-                      <span className="text-sm font-bold text-red-500 bg-red-50 px-2 py-1 rounded-md">{item.quantity} / {item.threshold}</span>
+                  recentTransactions.slice(0, 7).map((tx, idx) => (
+                    <div key={idx} className={`grid grid-cols-5 px-6 py-4 text-sm items-center border-b border-gray-100 last:border-0
+                                          ${idx % 2 === 0 ? 'bg-primary/5' : 'bg-white'}`}>
+                      <div className="font-mono text-xs opacity-70">COMP-{String(idx + 1).padStart(3, '0')}</div>
+                      <div className="font-medium text-primary col-span-2">{tx.item_name || tx.itemName || 'Unknown Item'}</div>
+                      <div>
+                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase
+                                                 ${(tx.action === 'IN' || tx.type === 'in') ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
+                          {(tx.action === 'IN' || tx.type === 'in') ? 'Stock In' : 'Stock Out'}
+                        </span>
+                      </div>
+                      <div className="font-bold text-primary text-right">{tx.quantity}</div>
                     </div>
                   ))
                 )}
-              </div>
-            </div>
-
-            {/* Recent Sales Table - Span 7 */}
-            <div className="col-span-12 lg:col-span-7">
-              <h3 className="text-xl font-bold text-primary mb-4">Recent Sales</h3>
-              <div className="bg-white rounded-2xl overflow-hidden shadow-sm border border-primary/5">
-                <div className="bg-primary text-white grid grid-cols-5 px-6 py-4 text-xs font-semibold uppercase tracking-wider">
-                  <div>ID</div>
-                  <div className="col-span-2">Item Name</div>
-                  <div>Status</div>
-                  <div className="text-right">Qty</div>
-                </div>
-                <div className="flex flex-col">
-                  {recentTransactions.length === 0 ? (
-                    <div className="p-6 text-center text-gray-400 text-sm">No recent transactions.</div>
-                  ) : (
-                    recentTransactions.slice(0, 5).map((tx, idx) => (
-                      <div key={idx} className={`grid grid-cols-5 px-6 py-4 text-sm items-center border-b border-gray-100 last:border-0
-                                            ${idx % 2 === 0 ? 'bg-primary/5' : 'bg-white'}`}>
-                        <div className="font-mono text-xs opacity-70">COMP-{String(idx + 1).padStart(3, '0')}</div>
-                        <div className="font-medium text-primary col-span-2">{tx.item_name || tx.itemName || 'Unknown Item'}</div>
-                        <div>
-                          <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase
-                                                   ${(tx.action === 'IN' || tx.type === 'in') ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
-                            {(tx.action === 'IN' || tx.type === 'in') ? 'Stock In' : 'Stock Out'}
-                          </span>
-                        </div>
-                        <div className="font-bold text-primary text-right">{tx.quantity}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
               </div>
             </div>
           </div>
@@ -352,6 +400,98 @@ const Dashboard = () => {
 
         </div>
       </div>
+
+      {/* Stock In/Out Modal */}
+      {showStockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setShowStockModal(false)}>
+          <div className="bg-primary rounded-3xl p-8 w-[500px] shadow-2xl relative text-white" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowStockModal(false)} className="absolute top-4 right-4 text-white/50 hover:text-white">
+              <HiOutlineX className="text-xl" />
+            </button>
+
+            <h2 className="text-xl font-bold mb-6">Stock In / Stock Out</h2>
+
+            <form onSubmit={handleStockSubmit}>
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-white/80 mb-2">Barcode or Item Name</label>
+                <div className="relative">
+                  <HiOutlineQrcode className="absolute left-4 top-1/2 -translate-y-1/2 text-white/60 text-lg" />
+                  <input
+                    name="barcode"
+                    value={stockForm.barcode}
+                    onChange={handleStockFormChange}
+                    onBlur={(e) => handleLookup(e.target.value)}
+                    placeholder="Scan Barcode"
+                    autoFocus
+                    className="w-full bg-transparent border border-white/30 rounded-lg pl-12 pr-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 transition-all font-medium"
+                  />
+                </div>
+                {lookedUpItem && (
+                  <div className="mt-2 text-xs text-emerald-300 font-bold bg-white/10 p-2 rounded flex justify-between">
+                    <span>{lookedUpItem.name}</span>
+                    <span>Stock: {lookedUpItem.stock}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-white/80 mb-2">Action</label>
+                  <div className="relative">
+                    <select
+                      name="action"
+                      value={stockForm.action}
+                      onChange={handleStockFormChange}
+                      className="w-full bg-transparent border border-white/30 rounded-lg px-4 py-3 text-white focus:outline-none appearance-none cursor-pointer"
+                    >
+                      <option value="IN" className="bg-primary">Stock In</option>
+                      <option value="OUT" className="bg-primary">Stock Out</option>
+                    </select>
+                    <HiOutlineChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-white/60 pointer-events-none" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-white/80 mb-2">Quantity</label>
+                  <input
+                    type="number"
+                    name="quantity"
+                    min="1"
+                    value={stockForm.quantity}
+                    onChange={handleStockFormChange}
+                    className="w-full bg-transparent border border-white/30 rounded-lg px-4 py-3 text-white text-center font-bold focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+              </div>
+
+              <div className="mb-8">
+                <label className="block text-sm font-medium text-white/80 mb-2">Reason</label>
+                <textarea
+                  name="reason"
+                  rows="3"
+                  value={stockForm.reason}
+                  onChange={handleStockFormChange}
+                  placeholder="Reason for inventory update"
+                  className="w-full bg-transparent border border-white/30 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:border-emerald-400 resize-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={stockProcessing}
+                className="w-40 py-2.5 bg-[#D1FAE5] text-primary font-bold rounded-xl hover:bg-white transition-colors"
+              >
+                {stockProcessing ? 'Processing...' : 'Submit'}
+              </button>
+
+              {stockMessage && (
+                <div className={`mt-4 text-center text-sm font-bold ${stockMessage.type === 'success' ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {stockMessage.text}
+                </div>
+              )}
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
