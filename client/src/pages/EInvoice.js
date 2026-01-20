@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import html2pdf from 'html2pdf.js';
 import {
     HiOutlineDocumentText,
     HiOutlineCheckCircle,
@@ -95,7 +96,9 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
         recipientPin: '',
         items: [
             { id: 1, product: '', hsn: '8414', qty: 1, rate: 0, gstPercent: 18 }
-        ]
+        ],
+        vehicleNumber: '',
+        transportDistance: ''
     });
 
     // History state
@@ -120,16 +123,317 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
         transGstin: '',
         vehicleNo: ''
     });
-    const [generatingEwb, setGeneratingEwb] = useState(false);
     const [showEwbModal, setShowEwbModal] = useState(false);
+
     const [showEwbSuccessModal, setShowEwbSuccessModal] = useState(false);
     const [generatedEwb, setGeneratedEwb] = useState(null);
+    const [generatingEwb, setGeneratingEwb] = useState(false);
+
+    // Helpers
+    const formatINR = (val) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val || 0);
+
+    const amountInWords = (num) => {
+        if (!num) return 'Zero';
+        const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
+        const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+        const n = ('000000000' + num).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
+        if (!n) return '';
+        let str = '';
+        str += (n[1] != 0) ? (a[Number(n[1])] || b[n[1][0]] + ' ' + a[n[1][1]]) + 'Crore ' : '';
+        str += (n[2] != 0) ? (a[Number(n[2])] || b[n[2][0]] + ' ' + a[n[2][1]]) + 'Lakh ' : '';
+        str += (n[3] != 0) ? (a[Number(n[3])] || b[n[3][0]] + ' ' + a[n[3][1]]) + 'Thousand ' : '';
+        str += (n[4] != 0) ? (a[Number(n[4])] || b[n[4][0]] + ' ' + a[n[4][1]]) + 'Hundred ' : '';
+        str += (n[5] != 0) ? ((str != '') ? 'and ' : '') + (a[Number(n[5])] || b[n[5][0]] + ' ' + a[n[5][1]]) + 'Only' : '';
+        return str;
+    };
+
+    const getInvoiceTemplate = (data, type = 'preview') => {
+        const isDraft = type === 'preview';
+        const inv = data;
+        const items = inv.items || [];
+
+        // Calculate totals if not provided
+        let taxableValue = 0, totalTax = 0, invoiceTotal = 0;
+        items.forEach(item => {
+            const amt = (item.qty || item.quantity || 0) * (item.rate || 0);
+            taxableValue += amt;
+            const tax = amt * ((item.gstPercent || 18) / 100);
+            totalTax += tax;
+        });
+        invoiceTotal = taxableValue + totalTax;
+        const cgst = totalTax / 2;
+        const sgst = totalTax / 2;
+
+        return `
+            <div style="font-family: Arial, sans-serif; font-size: 9pt; color: #000; line-height: 1.3; background: white; padding: 10px; width: 100%;">
+                <!-- Header Table -->
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 5px;">
+                    <tr>
+                        <td style="width: 20%; vertical-align: top; font-size: 8pt;">
+                            ${!isDraft ? `
+                                <div><b>IRN:</b> ${inv.irn || '-'}</div>
+                                <div><b>Ack No:</b> ${inv.ackNo || '-'}</div>
+                                <div><b>Ack Date:</b> ${inv.ackDate || '-'}</div>
+                            ` : '<div style="color: #666;">(IRN Generated Post-Submission)</div>'}
+                        </td>
+                        <td style="width: 60%; text-align: center; vertical-align: top;">
+                            <h2 style="font-size: 14pt; font-weight: bold; margin: 0;">TAX INVOICE</h2>
+                        </td>
+                        <td style="width: 20%; text-align: right; vertical-align: top;">
+                            <div style="font-size: 8pt; font-weight: bold;">e-Invoice</div>
+                            ${inv.qrcode ? `<img src="${inv.qrcode}" style="width: 80px; height: 80px; display: block; margin-left: auto;" />` : '<div style="width: 80px; height: 80px; border: 1px dashed #ccc; margin-left: auto;">QR</div>'}
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Main Details Table -->
+                <table style="width: 100%; border: 1px solid #000; border-collapse: collapse;">
+                    <tr>
+                        <!-- Left Column -->
+                        <td style="width: 50%; border-right: 1px solid #000; vertical-align: top;">
+                            <!-- Supplier -->
+                            <div style="padding: 5px; border-bottom: 1px solid #000;">
+                                <div style="font-weight: bold; font-size: 10pt;">${selectedBusiness?.name || 'Breeze Techniques'}</div>
+                                <div style="font-size: 8pt;">
+                                    ${selectedBusiness?.address || '113-Makkavi Nagar, Irugur'}<br/>
+                                    Ph: ${selectedBusiness?.phone || '8056765859'}<br/>
+                                    GSTIN/UIN: <b>${selectedBusiness?.gstin || ''}</b><br/>
+                                    State Name: ${selectedBusiness?.state || 'Tamil Nadu'}, Code: 33<br/>
+                                    CIN: -
+                                </div>
+                            </div>
+                            
+                            <!-- Consignee -->
+                            <div style="padding: 5px; border-bottom: 1px solid #000;">
+                                <div style="font-size: 8pt; color: #444;">Consignee (Ship to)</div>
+                                <div style="font-weight: bold;">${inv.recipientName || 'Buyer Name'}</div>
+                                <div style="font-size: 8pt;">
+                                    ${inv.recipientAddress || 'Address'}<br/>
+                                    GSTIN/UIN: <b>${inv.recipientGstin || ''}</b><br/>
+                                    State Name: ${inv.recipientState || 'Tamil Nadu'}, Code: 33
+                                </div>
+                            </div>
+
+                            <!-- Buyer -->
+                            <div style="padding: 5px;">
+                                <div style="font-size: 8pt; color: #444;">Buyer (Bill to)</div>
+                                <div style="font-weight: bold;">${inv.recipientName || 'Buyer Name'}</div>
+                                <div style="font-size: 8pt;">
+                                    ${inv.recipientAddress || 'Address'}<br/>
+                                    GSTIN/UIN: <b>${inv.recipientGstin || ''}</b><br/>
+                                    State Name: ${inv.recipientState || 'Tamil Nadu'}, Code: 33
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- Right Column -->
+                        <td style="width: 50%; vertical-align: top;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <tr style="border-bottom: 1px solid #000;">
+                                    <td style="padding: 5px; border-right: 1px solid #000; width: 50%;">
+                                        <div style="font-size: 7pt;">Invoice No.</div>
+                                        <div style="font-weight: bold;">${inv.invoiceNumber || 'DRAFT'}</div>
+                                    </td>
+                                    <td style="padding: 5px;">
+                                        <div style="font-size: 7pt;">Dated</div>
+                                        <div style="font-weight: bold;">${inv.invoiceDate || new Date().toLocaleDateString()}</div>
+                                    </td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid #000;">
+                                    <td style="padding: 5px; border-right: 1px solid #000;">
+                                        <div style="font-size: 7pt;">Delivery Note</div>
+                                        <div>-</div>
+                                    </td>
+                                    <td style="padding: 5px;">
+                                        <div style="font-size: 7pt;">Mode/Terms of Payment</div>
+                                        <div>Immediate</div>
+                                    </td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid #000;">
+                                    <td style="padding: 5px; border-right: 1px solid #000;">
+                                        <div style="font-size: 7pt;">Reference No. & Date</div>
+                                        <div>-</div>
+                                    </td>
+                                    <td style="padding: 5px;">
+                                        <div style="font-size: 7pt;">Other References</div>
+                                        <div>-</div>
+                                    </td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid #000;">
+                                    <td style="padding: 5px; border-right: 1px solid #000;">
+                                        <div style="font-size: 7pt;">Buyer's Order No.</div>
+                                        <div>-</div>
+                                    </td>
+                                    <td style="padding: 5px;">
+                                        <div style="font-size: 7pt;">Dated</div>
+                                        <div>-</div>
+                                    </td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid #000;">
+                                    <td style="padding: 5px; border-right: 1px solid #000;">
+                                        <div style="font-size: 7pt;">Dispatch Doc No.</div>
+                                        <div>-</div>
+                                    </td>
+                                    <td style="padding: 5px;">
+                                        <div style="font-size: 7pt;">Delivery Note Date</div>
+                                        <div>-</div>
+                                    </td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid #000;">
+                                    <td style="padding: 5px; border-right: 1px solid #000;">
+                                        <div style="font-size: 7pt;">Dispatched through</div>
+                                        <div>Road</div>
+                                    </td>
+                                    <td style="padding: 5px;">
+                                        <div style="font-size: 7pt;">Destination</div>
+                                        <div>${inv.recipientState || '-'}</div>
+                                    </td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid #000;">
+                                    <td style="padding: 5px; border-right: 1px solid #000;">
+                                        <div style="font-size: 7pt;">Bill of Lading/LR-RR No.</div>
+                                        <div>-</div>
+                                    </td>
+                                    <td style="padding: 5px;">
+                                        <div style="font-size: 7pt;">Motor Vehicle No.</div>
+                                        <div style="font-weight: bold;">${inv.vehicleNumber || '-'}</div>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2" style="padding: 5px;">
+                                        <div style="font-size: 7pt;">Terms of Delivery</div>
+                                        <div style="font-size: 8pt;">-</div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Items Table -->
+                <table style="width: 100%; border: 1px solid #000; border-top: none; border-collapse: collapse; font-size: 8pt;">
+                    <thead>
+                        <tr style="border-top: 1px solid #000;">
+                            <th style="border-right: 1px solid #000; padding: 5px; width: 30px;">Sl</th>
+                            <th style="border-right: 1px solid #000; padding: 5px;">Description of Goods</th>
+                            <th style="border-right: 1px solid #000; padding: 5px; width: 60px;">HSN/SAC</th>
+                            <th style="border-right: 1px solid #000; padding: 5px; width: 60px;">Quantity</th>
+                            <th style="border-right: 1px solid #000; padding: 5px; width: 70px;">Rate</th>
+                            <th style="border-right: 1px solid #000; padding: 5px; width: 40px;">Per</th>
+                            <th style="padding: 5px; width: 80px; text-align: right;">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map((item, i) => `
+                            <tr style="border-top: 1px solid #000;">
+                                <td style="border-right: 1px solid #000; padding: 5px; text-align: center;">${i + 1}</td>
+                                <td style="border-right: 1px solid #000; padding: 5px;"><b>${item.product || item.itemName}</b></td>
+                                <td style="border-right: 1px solid #000; padding: 5px; text-align: center;">${item.hsn || '8414'}</td>
+                                <td style="border-right: 1px solid #000; padding: 5px; text-align: center;"><b>${item.qty || item.quantity}</b></td>
+                                <td style="border-right: 1px solid #000; padding: 5px; text-align: right;">${formatINR(item.rate)}</td>
+                                <td style="border-right: 1px solid #000; padding: 5px; text-align: center;">Nos</td>
+                                <td style="padding: 5px; text-align: right;"><b>${formatINR((item.qty || item.quantity) * item.rate)}</b></td>
+                            </tr>
+                        `).join('')}
+                        <!-- Spacer row -->
+                        <tr style="border-top: 1px solid #000; height: 50px;">
+                            <td style="border-right: 1px solid #000;"></td>
+                            <td style="border-right: 1px solid #000;"></td>
+                            <td style="border-right: 1px solid #000;"></td>
+                            <td style="border-right: 1px solid #000;"></td>
+                            <td style="border-right: 1px solid #000;"></td>
+                            <td style="border-right: 1px solid #000;"></td>
+                            <td></td>
+                        </tr>
+                        
+                        <!-- Tax rows -->
+                        <tr style="border-top: 1px solid #000;">
+                            <td colspan="3" style="border-right: 1px solid #000;"></td>
+                            <td colspan="3" style="border-right: 1px solid #000; text-align: right; padding: 5px;">
+                                <i>Output CGST 9%</i><br/>
+                                <i>Output SGST 9%</i>
+                            </td>
+                            <td style="text-align: right; padding: 5px;">
+                                ${formatINR(cgst)}<br/>
+                                ${formatINR(sgst)}
+                            </td>
+                        </tr>
+                        <tr style="border-top: 1px solid #000; font-weight: bold;">
+                            <td colspan="6" style="border-right: 1px solid #000; text-align: right; padding: 5px;">Total</td>
+                            <td style="text-align: right; padding: 5px;">₹ ${formatINR(invoiceTotal)}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- Footer -->
+                <table style="width: 100%; border: 1px solid #000; border-top: none; border-collapse: collapse;">
+                    <tr>
+                        <td style="width: 50%; border-right: 1px solid #000; padding: 5px; font-size: 8pt; vertical-align: top;">
+                            <div>Amount Chargeable (in words)</div>
+                            <div style="font-weight: bold; margin-bottom: 10px;">INR ${amountInWords(Math.round(invoiceTotal))} Only</div>
+                            
+                            <div style="margin-top: 10px;">
+                                <b>Company's Bank Details</b><br/>
+                                Bank Name: KARUR VYSYA BANK<br/>
+                                A/c No: 1620223000000404<br/>
+                                Branch & IFS Code : R.N PURAM, CBE & KVBL0001620
+                            </div>
+                        </td>
+                        <td style="width: 50%; padding: 5px; font-size: 8pt; vertical-align: top;">
+                            <div style="text-align: right; font-weight: bold;">for Breeze Techniques</div>
+                            <div style="height: 40px;"></div>
+                            <div style="text-align: right; border-top: 1px solid #ccc; padding-top: 2px; margin-top: 10px;">Authorised Signatory</div>
+                        </td>
+                    </tr>
+                </table>
+                
+                <div style="text-align: center; font-size: 7pt; margin-top: 5px;">This is a Computer Generated Invoice</div>
+            </div>
+        `;
+    };
 
     // Load history on mount
     useEffect(() => {
         loadHistory();
         loadStats();
     }, [selectedBusiness]);
+
+    // Load shared invoice data from Invoice page (localStorage)
+    useEffect(() => {
+        const sharedData = localStorage.getItem('sharedInvoiceData');
+        if (sharedData) {
+            try {
+                const data = JSON.parse(sharedData);
+                // Extract PIN from address if available (last 6 digits)
+                const pinMatch = data.customerAddress?.match(/(\d{6})/);
+                const pin = pinMatch ? pinMatch[1] : '';
+
+                // Extract state code from GSTIN (first 2 characters)
+                const stateCode = data.customerGST?.substring(0, 2) || '33';
+
+                setInvoiceForm(prev => ({
+                    ...prev,
+                    invoiceNumber: data.invoiceNumber || prev.invoiceNumber,
+                    recipientGstin: data.customerGST || '',
+                    recipientName: data.customerName || '',
+                    recipientState: stateCode,
+                    recipientPin: pin,
+                    items: data.items?.length > 0 ? data.items.map((item, idx) => ({
+                        id: idx + 1,
+                        product: item.product || '',
+                        hsn: item.hsn || '8414',
+                        qty: item.qty || 1,
+                        rate: item.rate || 0,
+                        gstPercent: item.gstPercent || 18
+                    })) : prev.items,
+                    vehicleNumber: data.vehicleNumber || '',
+                    transportDistance: data.transportDistance || ''
+                }));
+            } catch (e) {
+                console.error('Error parsing shared invoice data:', e);
+            }
+        }
+    }, []);
 
     // Load E-Way Bill invoices when tab changes
     useEffect(() => {
@@ -235,28 +539,6 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                 loadHistory();
                 loadStats();
 
-                // Auto-download EWB JSON
-                if (data.ewbNo) {
-                    const ewbData = JSON.stringify({
-                        ewbNo: data.ewbNo,
-                        ewbValidFrom: data.ewbValidFrom,
-                        ewbValidUpto: data.ewbValidUpto,
-                        irn: selectedEwbInvoice.irn,
-                        invoiceNumber: selectedEwbInvoice.invoice_number,
-                        distance: ewbForm.distance,
-                        vehicleNo: ewbForm.vehicleNo || null,
-                        transporter: ewbForm.transName || null
-                    }, null, 2);
-
-                    const blob = new Blob([ewbData], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `EWB-${data.ewbNo}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                }
-
                 // Reset form
                 setEwbForm({
                     distance: '',
@@ -302,6 +584,20 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
             setShowSuccessModal(false);
             setActiveTab('eway'); // Switch to E-Way Bill tab
             setMessage({ type: 'info', text: 'Enter distance and generate E-Way Bill for this invoice.' });
+
+            // Try to load cached transportation details
+            try {
+                const cachedMeta = JSON.parse(localStorage.getItem(`ewb_meta_${ewbInvoice.invoice_number}`) || '{}');
+                if (cachedMeta.vehicleNo || cachedMeta.distance) {
+                    setEwbForm(prev => ({
+                        ...prev,
+                        distance: cachedMeta.distance || '',
+                        vehicleNo: cachedMeta.vehicleNo || ''
+                    }));
+                }
+            } catch (e) {
+                console.error('Error loading cached transport details:', e);
+            }
         } else {
             setMessage({ type: 'error', text: 'IRN data not available. Please try from E-Way Bill tab.' });
         }
@@ -430,32 +726,18 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                 setShowSuccessModal(true);
                 setMessage({ type: 'success', text: 'IRN generated successfully!' });
 
+                // Cache transportation details for E-Way Bill
+                try {
+                    localStorage.setItem(`ewb_meta_${payload.invoiceNumber}`, JSON.stringify({
+                        vehicleNo: invoiceForm.vehicleNumber,
+                        distance: invoiceForm.transportDistance
+                    }));
+                } catch (e) { console.error('Error caching transport details', e); }
+
                 // Refresh all data
                 loadHistory();
                 loadStats();
                 loadEwbInvoices();
-
-                // Auto-download JSON (optional)
-                if (data.irn && data.qrcode) {
-                    const jsonData = JSON.stringify({
-                        irn: data.irn,
-                        ackNo: data.ackNo || 'N/A',
-                        ackDate: data.ackDate || new Date().toISOString(),
-                        invoiceNumber: payload.invoiceNumber,
-                        invoiceDate: payload.invoiceDate,
-                        supplierGstin: payload.supplierGstin,
-                        recipientGstin: payload.recipientGstin,
-                        totalAmount: payload.totals?.invoiceTotal
-                    }, null, 2);
-
-                    const blob = new Blob([jsonData], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `IRN-${payload.invoiceNumber}.json`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                }
 
                 // Reset form
                 setInvoiceForm(prev => ({
@@ -503,8 +785,160 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
         record.recipient_name?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    // Reusable E-Way Bill Template Function
+    const getEwayBillTemplate = (ewbData, invoiceData) => {
+        const ewb = ewbData || {};
+        const invoice = invoiceData || {};
+        // Use items from ewb, invoice, or fallback to invoiceForm if matching
+        const items = ewb.items || invoice.items || (invoiceForm.invoiceNumber === invoice.invoice_number ? invoiceForm.items : []) || [];
+
+        const formatDate = (d) => {
+            if (!d) return '-';
+            const date = new Date(d);
+            return date.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        };
+
+        return `
+            <div style="font-family: Arial, sans-serif; max-width: 210mm; background: white; color: #000; font-size: 10px; padding: 10px;">
+                <!-- Header -->
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px; border-bottom: 2px solid #000;">
+                    <tr>
+                        <td style="color: #000; font-size: 24px; font-weight: bold; padding: 10px;">E-Way Bill</td>
+                        <td style="text-align: right; padding: 10px;">
+                            ${ewb.ewbQrCode ? `<img src="${ewb.ewbQrCode}" style="width: 80px; height: 80px;" />` : ''}
+                            <div style="font-size: 8px;">Add Your Qr Here</div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- 1. E-WAY BILL Details -->
+                <div style="background: #f0f0f0; color: #000; padding: 4px 8px; font-weight: bold; border: 1px solid #ccc; border-bottom: none;">1. E-WAY BILL Details</div>
+                <table style="width: 100%; border: 1px solid #ccc; border-collapse: collapse; margin-bottom: 15px;">
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 5px; border-right: 1px solid #eee; width: 33.3%;">eWay Bill No: <b>${ewb.ewbNo || '-'}</b></td>
+                        <td style="padding: 5px; border-right: 1px solid #eee; width: 33.3%;">
+                            Generated Date: <b>${formatDate(ewb.ewbDate) || new Date().toLocaleDateString()}</b>
+                            <div style="font-size: 9px;">${new Date().toLocaleTimeString()}</div>
+                        </td>
+                        <td style="padding: 5px; width: 33.3%;">
+                            Generated By: <b>${selectedBusiness?.gstin || '-'}</b>
+                            <div>Valid Upto: <b>${formatDate(ewb.ewbValidUpto)}</b></div>
+                        </td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 5px; border-right: 1px solid #eee;">Mode: <b>Road</b></td>
+                        <td style="padding: 5px; border-right: 1px solid #eee;">Approx Distance: <b>${ewb.distance || '-'}km</b></td>
+                        <td style="padding: 5px;">Transaction type: <b>Regular</b></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px; border-right: 1px solid #eee;">Type: <b>Outward-Supply</b></td>
+                        <td colspan="2" style="padding: 5px;">
+                            Document Details: <b>Tax-Invoice-${invoice.invoice_number}</b>
+                            <div>${formatDate(invoice.invoice_date)}</div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- 2. Address Details -->
+                <div style="background: #f0f0f0; color: #000; padding: 4px 8px; font-weight: bold; border: 1px solid #ccc; border-bottom: none;">2. Address Details</div>
+                <table style="width: 100%; border: 1px solid #ccc; border-collapse: collapse; margin-bottom: 15px;">
+                    <tr>
+                        <td style="border-right: 1px solid #ccc; width: 50%; vertical-align: top;">
+                            <div style="background: #f8f8f8; padding: 4px 8px; font-weight: bold; border-bottom: 1px solid #eee;">From</div>
+                            <div style="padding: 8px;">
+                                <div style="margin-bottom: 3px;">GSTIN: <b>${invoice.supplier_gstin || selectedBusiness?.gstin}</b></div>
+                                <div style="margin-bottom: 3px;">${invoice.supplier_name || selectedBusiness?.name}</div>
+                                <div style="margin-bottom: 8px;">${invoice.supplier_state || selectedBusiness?.state}</div>
+                                <div style="color: #444; font-size: 9px; margin-bottom: 2px;">::Dispatch From::</div>
+                                <div>${invoice.supplier_address || ''}</div>
+                            </div>
+                        </td>
+                        <td style="width: 50%; vertical-align: top;">
+                            <div style="background: #f8f8f8; padding: 4px 8px; font-weight: bold; border-bottom: 1px solid #eee;">To</div>
+                            <div style="padding: 8px;">
+                                <div style="margin-bottom: 3px;">GSTIN: <b>${invoice.recipient_gstin || '-'}</b></div>
+                                <div style="margin-bottom: 3px;">${invoice.recipient_name || '-'}</div>
+                                <div style="margin-bottom: 8px;">${invoice.recipient_state || '-'}</div>
+                                <div style="color: #444; font-size: 9px; margin-bottom: 2px;">::Ship To::</div>
+                                <div>${invoice.recipient_address || ''}</div>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- 3. Goods Details -->
+                <div style="background: #f0f0f0; color: #000; padding: 4px 8px; font-weight: bold; border: 1px solid #ccc; border-bottom: none;">3. Goods Details</div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 9px; border: 1px solid #ccc; margin-bottom: 15px;">
+                    <tr style="background: #f8f8f8;">
+                        <th style="border: 1px solid #ccc; padding: 6px;">HSN Code</th>
+                        <th style="border: 1px solid #ccc; padding: 6px;">Product Name & Desc</th>
+                        <th style="border: 1px solid #ccc; padding: 6px;">Quantity</th>
+                        <th style="border: 1px solid #ccc; padding: 6px;">Taxable Amount Rs.</th>
+                        <th style="border: 1px solid #ccc; padding: 6px;">Tax Rate</th>
+                    </tr>
+                    ${items.map(item => `
+                    <tr>
+                        <td style="border: 1px solid #ccc; padding: 6px;">${item.hsn || '-'}</td>
+                        <td style="border: 1px solid #ccc; padding: 6px;">${item.product || item.itemName || 'Item'}</td>
+                        <td style="border: 1px solid #ccc; padding: 6px; text-align: center;">${item.qty || 0}</td>
+                        <td style="border: 1px solid #ccc; padding: 6px; text-align: right;">${((item.rate || 0) * (item.qty || 0)).toFixed(2)}</td>
+                        <td style="border: 1px solid #ccc; padding: 6px; text-align: center;">${item.gstPercent || 18}%</td>
+                    </tr>
+                    `).join('')}
+                </table>
+
+                <!-- 4. Transportation Details -->
+                <div style="background: #f0f0f0; color: #000; padding: 4px 8px; font-weight: bold; border: 1px solid #ccc; border-bottom: none;">4. Transportation Details</div>
+                <table style="width: 100%; border: 1px solid #ccc; border-collapse: collapse; margin-bottom: 15px;">
+                    <tr>
+                        <td style="padding: 8px;">Transport ID & Name: <b>${ewb.transId || '-'} & ${ewb.transName || '-'}</b></td>
+                        <td style="padding: 8px; text-align: right;">Transport Doc. No. & Date: <b>${formatDate(new Date())}</b></td>
+                    </tr>
+                </table>
+
+                <!-- 5. Vehicle Details -->
+                <div style="background: #f0f0f0; color: #000; padding: 4px 8px; font-weight: bold; border: 1px solid #ccc; border-bottom: none;">5. Vehicle Details</div>
+                <table style="width: 100%; border: 1px solid #ccc; border-collapse: collapse; margin-bottom: 10px; font-size: 8px;">
+                    <tr style="background: #f8f8f8; font-weight: bold; border-bottom: 1px solid #aaa;">
+                        <th style="border-right: 1px solid #ccc; padding: 6px 2px; width: 10%;">Mode</th>
+                        <th style="border-right: 1px solid #ccc; padding: 6px 2px; width: 25%;">Vehicle No.</th>
+                        <th style="border-right: 1px solid #ccc; padding: 6px 2px; width: 15%;">From</th>
+                        <th style="border-right: 1px solid #ccc; padding: 6px 2px; width: 15%;">Entered Date</th>
+                        <th style="border-right: 1px solid #ccc; padding: 6px 2px; width: 15%;">Entered By</th>
+                        <th style="border-right: 1px solid #ccc; padding: 6px 2px; width: 10%;">CEWB No.</th>
+                        <th style="padding: 6px 2px; width: 10%;">Multi Veh.</th>
+                    </tr>
+                    <tr style="text-align: center;">
+                        <td style="border-right: 1px solid #ccc; padding: 6px 2px;">Road</td>
+                        <td style="border-right: 1px solid #ccc; padding: 6px 2px;">${ewb.vehicleNo || '-'}</td>
+                        <td style="border-right: 1px solid #ccc; padding: 6px 2px;">${invoice.supplier_state || '-'}</td>
+                        <td style="border-right: 1px solid #ccc; padding: 6px 2px;">${formatDate(new Date())}</td>
+                        <td style="border-right: 1px solid #ccc; padding: 6px 2px;">${selectedBusiness?.gstin || '-'}</td>
+                        <td style="border-right: 1px solid #ccc; padding: 6px 2px;">-</td>
+                        <td style="padding: 6px 2px;">-</td>
+                    </tr>
+                </table>
+
+                <div style="text-align: center; margin-top: 10px;">
+                    <div style="font-size: 8px;">No : ${ewb.ewbNo || '-'}</div>
+                </div>
+            </div>
+        `;
+    };
+
     return (
         <div className="min-h-screen bg-mint p-8">
+            {/* Hidden E-Way Bill Preview for Bulk Download */}
+            <div
+                id="eway-preview"
+                style={{ display: 'none' }}
+                dangerouslySetInnerHTML={{
+                    __html: getEwayBillTemplate(
+                        generatedEwb || ((selectedEwbInvoice && selectedEwbInvoice.ewb_no) ? { ...selectedEwbInvoice, ewbNo: selectedEwbInvoice.ewb_no, ewbDate: selectedEwbInvoice.ewb_date, ewbValidUpto: selectedEwbInvoice.ewb_valid_upto, distance: selectedEwbInvoice.distance, vehicleNo: selectedEwbInvoice.vehicle_no } : null),
+                        generatedEwb?.invoice || selectedEwbInvoice || invoiceForm
+                    )
+                }}
+            />
             {/* Page Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                 <div>
@@ -590,19 +1024,20 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
             <div className="bg-white rounded-t-2xl border-b border-gray-200">
                 <div className="flex overflow-x-auto">
                     {[
-                        { id: 'sales', label: '📄 Generate IRN' },
-                        { id: 'eway', label: '🚚 E-Way Bill' },
-                        { id: 'history', label: '📋 History' }
+                        { id: 'sales', label: 'Generate IRN', icon: HiOutlineDocumentText },
+                        { id: 'eway', label: 'E-Way Bill', icon: HiOutlineTruck },
+                        { id: 'history', label: 'History', icon: HiOutlineClock }
                     ].map(tab => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
-                            className={`flex-shrink-0 px-6 py-4 text-sm font-medium transition-colors relative
+                            className={`flex-shrink-0 px-6 py-4 text-sm font-medium transition-colors relative flex items-center gap-2
                                 ${activeTab === tab.id
                                     ? 'text-primary'
                                     : 'text-gray-500 hover:text-primary'
                                 }`}
                         >
+                            <tab.icon className="text-lg" />
                             {tab.label}
                             {activeTab === tab.id && (
                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
@@ -734,6 +1169,35 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                         onChange={handleFormChange}
                                         placeholder="600001"
                                         maxLength={6}
+                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Transportation Details (Optional for IRN, Required for EWB) */}
+                        <div className="bg-gray-50 rounded-xl p-6 mb-6">
+                            <h3 className="text-lg font-bold text-primary mb-4">Transportation Details</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-primary mb-2">Vehicle Number</label>
+                                    <input
+                                        type="text"
+                                        name="vehicleNumber"
+                                        value={invoiceForm.vehicleNumber || ''}
+                                        onChange={handleFormChange}
+                                        placeholder="e.g. TN38AB1234"
+                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-primary mb-2">Approx Distance (km)</label>
+                                    <input
+                                        type="number"
+                                        name="transportDistance"
+                                        value={invoiceForm.transportDistance || ''}
+                                        onChange={handleFormChange}
+                                        placeholder="e.g. 150"
                                         className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
                                     />
                                 </div>
@@ -876,8 +1340,10 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                             </div>
                         </div>
 
+
+
                         {/* Generate Button */}
-                        <div className="flex justify-end">
+                        <div className="flex justify-end mb-6">
                             <button
                                 type="submit"
                                 disabled={generating}
@@ -895,6 +1361,13 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                     </>
                                 )}
                             </button>
+                        </div>
+
+                        {/* Live Invoice Preview */}
+                        <div className="mt-8 border-t border-gray-200 pt-8 animate-fade-in">
+                            <div className="bg-gray-100 p-4 rounded-xl overflow-x-auto shadow-inner">
+                                <div id="einvoice-preview" dangerouslySetInnerHTML={{ __html: getInvoiceTemplate(invoiceForm, 'preview') }} />
+                            </div>
                         </div>
                     </form>
                 )}
@@ -926,7 +1399,20 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                     {ewbInvoices.map(inv => (
                                         <div
                                             key={inv.id}
-                                            onClick={() => setSelectedEwbInvoice(inv)}
+                                            onClick={() => {
+                                                setSelectedEwbInvoice(inv);
+                                                // Try to load cached transportation details
+                                                try {
+                                                    const cachedMeta = JSON.parse(localStorage.getItem(`ewb_meta_${inv.invoice_number}`) || '{}');
+                                                    if (cachedMeta.vehicleNo || cachedMeta.distance) {
+                                                        setEwbForm(prev => ({
+                                                            ...prev,
+                                                            distance: cachedMeta.distance || '',
+                                                            vehicleNo: cachedMeta.vehicleNo || ''
+                                                        }));
+                                                    }
+                                                } catch (e) { console.error('Error loading config', e); }
+                                            }}
                                             className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedEwbInvoice?.id === inv.id
                                                 ? 'border-primary bg-primary/5'
                                                 : 'border-gray-200 hover:border-primary/50'
@@ -1167,124 +1653,125 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
             </div>
 
             {/* Success Modal with QR Code - TALLY PRIME STYLE */}
-            {showSuccessModal && generatedIRN && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 animate-fade-in max-h-[90vh] overflow-y-auto">
-                        <div className="text-center space-y-6">
-                            {/* Success Header */}
-                            <div className="flex items-center justify-center gap-3 text-emerald-600">
-                                <HiOutlineCheckCircle className="text-4xl" />
-                                <h2 className="text-2xl font-bold">IRN Generated Successfully!</h2>
-                            </div>
+            {
+                showSuccessModal && generatedIRN && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 animate-fade-in">
+                            <div className="text-center space-y-4">
+                                {/* Success Header */}
+                                <div className="flex items-center justify-center gap-3 text-emerald-600">
+                                    <HiOutlineCheckCircle className="text-4xl" />
+                                    <h2 className="text-2xl font-bold">IRN Generated Successfully!</h2>
+                                </div>
 
-                            {/* IRN Display - Tally Prime Style */}
-                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border-2 border-blue-200">
-                                <p className="text-sm text-gray-600 mb-2">IRN Number</p>
-                                <p className="text-xl font-mono font-bold text-blue-900 tracking-wider break-all">
-                                    {generatedIRN.irn}
-                                </p>
-                            </div>
+                                {/* IRN Display - Tally Prime Style */}
+                                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl border-2 border-blue-200">
+                                    <p className="text-sm text-gray-600 mb-2">IRN Number</p>
+                                    <p className="text-xl font-mono font-bold text-blue-900 tracking-wider break-all">
+                                        {generatedIRN.irn}
+                                    </p>
+                                </div>
 
-                            {/* QR Code Display */}
-                            <div className="space-y-3">
-                                <h3 className="text-lg font-semibold text-gray-800">Verification QR Code</h3>
-                                {generatedIRN.qrcode ? (
-                                    <div className="bg-white p-4 rounded-xl border-4 border-emerald-200 inline-block shadow-lg">
-                                        <img
-                                            src={generatedIRN.qrcode}
-                                            alt="IRN QR Code"
-                                            className="w-64 h-64 mx-auto"
-                                        />
-                                    </div>
-                                ) : (
-                                    <div className="w-64 h-64 mx-auto bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 border-2 border-dashed border-gray-300">
-                                        <div className="text-center">
-                                            <HiOutlineQrcode className="text-6xl mx-auto mb-2" />
-                                            <p className="text-sm">QR Code unavailable</p>
+                                {/* QR Code Display */}
+                                <div className="space-y-3">
+                                    <h3 className="text-lg font-semibold text-gray-800">Verification QR Code</h3>
+                                    {generatedIRN.qrcode ? (
+                                        <div className="bg-white p-3 rounded-xl border-4 border-emerald-200 inline-block shadow-lg">
+                                            <img
+                                                src={generatedIRN.qrcode}
+                                                alt="IRN QR Code"
+                                                className="w-48 h-48 mx-auto"
+                                            />
                                         </div>
-                                    </div>
-                                )}
-                                <p className="text-xs text-gray-500">Scan to verify e-invoice on GST portal</p>
-                            </div>
+                                    ) : (
+                                        <div className="w-64 h-64 mx-auto bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 border-2 border-dashed border-gray-300">
+                                            <div className="text-center">
+                                                <HiOutlineQrcode className="text-6xl mx-auto mb-2" />
+                                                <p className="text-sm">QR Code unavailable</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-gray-500">Scan to verify e-invoice on GST portal</p>
+                                </div>
 
-                            {/* Action Buttons - Tally Prime Style */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-                                <button
-                                    onClick={() => {
-                                        // Get invoice data
-                                        const inv = generatedIRN.invoiceData || {};
-                                        const items = inv.items || [];
-                                        const totals = inv.totals || {};
+                                {/* Action Buttons - Compact Row */}
+                                <div className="grid grid-cols-4 gap-2 pt-3">
+                                    <button
+                                        onClick={() => {
+                                            // Get invoice data
+                                            const inv = generatedIRN.invoiceData || {};
+                                            const items = inv.items || [];
+                                            const totals = inv.totals || {};
 
-                                        // Format currency
-                                        const formatINR = (amt) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amt || 0);
+                                            // Format currency
+                                            const formatINR = (amt) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amt || 0);
 
-                                        // Format date
-                                        const formatDt = (d) => {
-                                            const date = new Date(d);
-                                            return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
-                                        };
+                                            // Format date
+                                            const formatDt = (d) => {
+                                                const date = new Date(d);
+                                                return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
+                                            };
 
-                                        // Number to words helper - with safeguards against infinite recursion
-                                        const numberToWords = (num) => {
-                                            // Safeguards
-                                            if (num === null || num === undefined || isNaN(num)) return 'Zero';
-                                            num = Math.floor(Math.abs(num)); // Handle negatives and decimals
-                                            if (num > 999999999999) return 'Amount Too Large'; // Limit to prevent stack overflow
+                                            // Number to words helper - with safeguards against infinite recursion
+                                            const numberToWords = (num) => {
+                                                // Safeguards
+                                                if (num === null || num === undefined || isNaN(num)) return 'Zero';
+                                                num = Math.floor(Math.abs(num)); // Handle negatives and decimals
+                                                if (num > 999999999999) return 'Amount Too Large'; // Limit to prevent stack overflow
 
-                                            const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
-                                                'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-                                            const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+                                                const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+                                                    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+                                                const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
 
-                                            if (num === 0) return 'Zero';
-                                            if (num < 20) return ones[num] || 'Zero';
-                                            if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? ' ' + ones[num % 10] : '');
-                                            if (num < 1000) return ones[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' ' + numberToWords(num % 100) : '');
-                                            if (num < 100000) return numberToWords(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + numberToWords(num % 1000) : '');
-                                            if (num < 10000000) return numberToWords(Math.floor(num / 100000)) + ' Lakh' + (num % 100000 ? ' ' + numberToWords(num % 100000) : '');
-                                            return numberToWords(Math.floor(num / 10000000)) + ' Crore' + (num % 10000000 ? ' ' + numberToWords(num % 10000000) : '');
-                                        };
+                                                if (num === 0) return 'Zero';
+                                                if (num < 20) return ones[num] || 'Zero';
+                                                if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? ' ' + ones[num % 10] : '');
+                                                if (num < 1000) return ones[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' ' + numberToWords(num % 100) : '');
+                                                if (num < 100000) return numberToWords(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + numberToWords(num % 1000) : '');
+                                                if (num < 10000000) return numberToWords(Math.floor(num / 100000)) + ' Lakh' + (num % 100000 ? ' ' + numberToWords(num % 100000) : '');
+                                                return numberToWords(Math.floor(num / 10000000)) + ' Crore' + (num % 10000000 ? ' ' + numberToWords(num % 10000000) : '');
+                                            };
 
-                                        const amountInWords = (amt) => {
-                                            if (amt === null || amt === undefined || isNaN(amt)) return 'Indian Rupee Zero Only';
-                                            amt = Math.abs(amt || 0);
-                                            const rupees = Math.floor(amt);
-                                            const paise = Math.round((amt - rupees) * 100);
-                                            let result = 'Indian Rupee ' + numberToWords(rupees);
-                                            if (paise > 0) result += ' and ' + numberToWords(paise) + ' Paise';
-                                            result += ' Only';
-                                            return result;
-                                        };
+                                            const amountInWords = (amt) => {
+                                                if (amt === null || amt === undefined || isNaN(amt)) return 'Indian Rupee Zero Only';
+                                                amt = Math.abs(amt || 0);
+                                                const rupees = Math.floor(amt);
+                                                const paise = Math.round((amt - rupees) * 100);
+                                                let result = 'Indian Rupee ' + numberToWords(rupees);
+                                                if (paise > 0) result += ' and ' + numberToWords(paise) + ' Paise';
+                                                result += ' Only';
+                                                return result;
+                                            };
 
-                                        // Get state info
-                                        const getStateInfo = (code) => {
-                                            const states = { '27': 'Maharashtra', '33': 'Tamil Nadu', '29': 'Karnataka', '07': 'Delhi', '24': 'Gujarat' };
-                                            return { name: states[code] || 'State', code: code };
-                                        };
+                                            // Get state info
+                                            const getStateInfo = (code) => {
+                                                const states = { '27': 'Maharashtra', '33': 'Tamil Nadu', '29': 'Karnataka', '07': 'Delhi', '24': 'Gujarat' };
+                                                return { name: states[code] || 'State', code: code };
+                                            };
 
-                                        const supplierState = getStateInfo(inv.supplierState || '33');
-                                        const buyerState = getStateInfo(inv.recipientState || '29');
+                                            const supplierState = getStateInfo(inv.supplierState || '33');
+                                            const buyerState = getStateInfo(inv.recipientState || '29');
 
-                                        // HSN tax breakdown
-                                        const hsnBreakdown = {};
-                                        items.forEach(item => {
-                                            const taxable = item.qty * item.rate;
-                                            const rate = item.gstPercent / 2; // CGST/SGST rate
-                                            const taxAmt = taxable * (item.gstPercent / 100) / 2;
-                                            if (!hsnBreakdown[item.hsn]) {
-                                                hsnBreakdown[item.hsn] = { taxable: 0, rate: rate, cgst: 0, sgst: 0 };
-                                            }
-                                            hsnBreakdown[item.hsn].taxable += taxable;
-                                            hsnBreakdown[item.hsn].cgst += taxAmt;
-                                            hsnBreakdown[item.hsn].sgst += taxAmt;
-                                        });
+                                            // HSN tax breakdown
+                                            const hsnBreakdown = {};
+                                            items.forEach(item => {
+                                                const taxable = item.qty * item.rate;
+                                                const rate = item.gstPercent / 2; // CGST/SGST rate
+                                                const taxAmt = taxable * (item.gstPercent / 100) / 2;
+                                                if (!hsnBreakdown[item.hsn]) {
+                                                    hsnBreakdown[item.hsn] = { taxable: 0, rate: rate, cgst: 0, sgst: 0 };
+                                                }
+                                                hsnBreakdown[item.hsn].taxable += taxable;
+                                                hsnBreakdown[item.hsn].cgst += taxAmt;
+                                                hsnBreakdown[item.hsn].sgst += taxAmt;
+                                            });
 
-                                        // Build items rows
-                                        let totalQty = 0;
-                                        const itemsHtml = items.map((item, idx) => {
-                                            const lineTotal = item.qty * item.rate;
-                                            totalQty += item.qty;
-                                            return `
+                                            // Build items rows
+                                            let totalQty = 0;
+                                            const itemsHtml = items.map((item, idx) => {
+                                                const lineTotal = item.qty * item.rate;
+                                                totalQty += item.qty;
+                                                return `
                                                 <tr>
                                                     <td style="border: 1px solid #000; padding: 6px; text-align: center;">${idx + 1}</td>
                                                     <td style="border: 1px solid #000; padding: 6px;">${item.product}</td>
@@ -1296,10 +1783,10 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                                     <td style="border: 1px solid #000; padding: 6px; text-align: right;">${formatINR(lineTotal)}</td>
                                                 </tr>
                                             `;
-                                        }).join('');
+                                            }).join('');
 
-                                        // CGST/SGST rows
-                                        const cgstHtml = `
+                                            // CGST/SGST rows
+                                            const cgstHtml = `
                                             <tr>
                                                 <td style="border: 1px solid #000; padding: 6px;"></td>
                                                 <td style="border: 1px solid #000; padding: 6px; text-align: right; font-style: italic;">CGST</td>
@@ -1322,8 +1809,8 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                             </tr>
                                         `;
 
-                                        // HSN breakdown table
-                                        const hsnRows = Object.entries(hsnBreakdown).map(([hsn, data]) => `
+                                            // HSN breakdown table
+                                            const hsnRows = Object.entries(hsnBreakdown).map(([hsn, data]) => `
                                             <tr>
                                                 <td style="border: 1px solid #000; padding: 4px;">${hsn}</td>
                                                 <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(data.taxable)}</td>
@@ -1335,11 +1822,11 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                             </tr>
                                         `).join('');
 
-                                        const totalTax = (totals.cgst || 0) + (totals.sgst || 0);
+                                            const totalTax = (totals.cgst || 0) + (totals.sgst || 0);
 
-                                        // Print layout - Tax Invoice format
-                                        const printWindow = window.open('', '_blank');
-                                        printWindow.document.write(`
+                                            // Print layout - Tax Invoice format
+                                            const printWindow = window.open('', '_blank');
+                                            printWindow.document.write(`
                                             <!DOCTYPE html>
                                             <html>
                                             <head>
@@ -1550,351 +2037,270 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                             </body>
                                             </html>
                                         `);
-                                        printWindow.document.close();
-                                        printWindow.focus();
-                                        setTimeout(() => printWindow.print(), 300);
-                                    }}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-primary text-primary rounded-xl hover:bg-primary/5 transition-colors font-medium"
-                                >
-                                    <HiOutlinePrinter className="text-lg" />
-                                    🖨️ Print Invoice
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        // Download Signed JSON
-                                        const dataStr = `data:text/json;charset=utf-8,${encodeURIComponent(generatedIRN.signedInvoice || JSON.stringify({ irn: generatedIRN.irn }))}`;
-                                        const dlAnchorElem = document.createElement('a');
-                                        dlAnchorElem.setAttribute('href', dataStr);
-                                        dlAnchorElem.setAttribute('download', `IRN-${generatedIRN.irn}-signed.json`);
-                                        dlAnchorElem.click();
-                                    }}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors font-medium"
-                                >
-                                    <HiOutlineDownload className="text-lg" />
-                                    💾 Download JSON
-                                </button>
-                                <button
-                                    onClick={openEwbFromIrn}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium"
-                                >
-                                    <HiOutlineTruck className="text-lg" />
-                                    🚚 Generate E-Way Bill
-                                </button>
-                                <button
-                                    onClick={() => setShowSuccessModal(false)}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-medium"
-                                >
-                                    Close
-                                </button>
+                                            printWindow.document.close();
+                                            printWindow.focus();
+                                            setTimeout(() => printWindow.print(), 300);
+                                        }}
+                                        className="flex items-center justify-center gap-1 px-3 py-2 border-2 border-primary text-primary rounded-lg hover:bg-primary/5 transition-colors font-medium text-sm">
+                                        <HiOutlinePrinter className="text-base" />
+                                        Print
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            // Download E-Invoice as PDF
+                                            const inv = generatedIRN.invoiceData || {};
+                                            const formatINR = (val) => parseFloat(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                                            const totalTax = parseFloat(totals.cgst || 0) + parseFloat(totals.sgst || 0) + parseFloat(totals.igst || 0);
+
+                                            // Ensure items array exists
+                                            const invoiceData = {
+                                                ...generatedIRN.invoiceData,
+                                                irn: generatedIRN.irn,
+                                                ackNo: generatedIRN.ackNo,
+                                                ackDate: generatedIRN.ackDate,
+                                                qrcode: generatedIRN.signedQrCode || generatedIRN.qrcode,
+                                                // Fallback to form items if generated data is missing items
+                                                items: (generatedIRN.invoiceData && generatedIRN.invoiceData.items) ? generatedIRN.invoiceData.items : invoiceForm.items
+                                            };
+
+                                            const pdfElement = document.createElement('div');
+                                            pdfElement.innerHTML = getInvoiceTemplate(invoiceData, 'final');
+
+                                            // Position off-screen but keeping it visible for html2canvas
+                                            pdfElement.style.position = 'absolute';
+                                            pdfElement.style.top = '-10000px';
+                                            pdfElement.style.left = '-10000px';
+                                            pdfElement.style.width = '794px'; // A4 width at 96dpi approx
+                                            pdfElement.style.background = 'white';
+
+                                            document.body.appendChild(pdfElement);
+
+                                            // Wait for images to load
+                                            setTimeout(() => {
+                                                const opt = {
+                                                    margin: 0,
+                                                    filename: `E-Invoice_${invoiceForm.invoiceNumber}.pdf`,
+                                                    image: { type: 'jpeg', quality: 0.98 },
+                                                    html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false },
+                                                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                                                };
+
+                                                html2pdf().set(opt).from(pdfElement).save().then(() => {
+                                                    document.body.removeChild(pdfElement);
+                                                }).catch(err => {
+                                                    console.error('PDF Generation Error:', err);
+                                                    document.body.removeChild(pdfElement);
+                                                });
+                                            }, 500);
+                                        }}
+                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium text-sm">
+                                        <HiOutlineDownload className="text-base" />
+                                        Download
+                                    </button>
+                                    <button
+                                        onClick={openEwbFromIrn}
+                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm">
+                                        <HiOutlineTruck className="text-base" />
+                                        E-Way Bill
+                                    </button>
+                                    <button
+                                        onClick={() => setShowSuccessModal(false)}
+                                        className="flex items-center justify-center gap-1 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium text-sm">
+                                        Close
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* E-Way Bill Quick Generate Modal */}
-            {showEwbModal && selectedEwbInvoice && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-8 animate-fade-in">
-                        <h2 className="text-2xl font-bold text-primary mb-4">🚚 Generate E-Way Bill</h2>
-                        <div className="mb-6">
-                            <p className="text-sm text-primary/60 mb-2">Invoice: <span className="font-medium text-primary">{selectedEwbInvoice.invoice_number}</span></p>
-                            <p className="text-sm text-primary/60">IRN: <span className="font-mono text-xs">{selectedEwbInvoice.irn?.substring(0, 30)}...</span></p>
-                        </div>
-
-                        <form onSubmit={handleGenerateEwb} className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-primary mb-2">Distance (km) *</label>
-                                <input
-                                    type="number"
-                                    name="distance"
-                                    value={ewbForm.distance}
-                                    onChange={handleEwbFormChange}
-                                    placeholder="e.g., 250"
-                                    min="1"
-                                    required
-                                    autoFocus
-                                    className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
-                                />
+            {
+                showEwbModal && selectedEwbInvoice && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-8 animate-fade-in">
+                            <h2 className="text-2xl font-bold text-primary mb-4">🚚 Generate E-Way Bill</h2>
+                            <div className="mb-6">
+                                <p className="text-sm text-primary/60 mb-2">Invoice: <span className="font-medium text-primary">{selectedEwbInvoice.invoice_number}</span></p>
+                                <p className="text-sm text-primary/60">IRN: <span className="font-mono text-xs">{selectedEwbInvoice.irn?.substring(0, 30)}...</span></p>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+
+                            <form onSubmit={handleGenerateEwb} className="space-y-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-primary mb-2">Vehicle Number</label>
+                                    <label className="block text-sm font-medium text-primary mb-2">Distance (km) *</label>
                                     <input
-                                        type="text"
-                                        name="vehicleNo"
-                                        value={ewbForm.vehicleNo}
+                                        type="number"
+                                        name="distance"
+                                        value={ewbForm.distance}
                                         onChange={handleEwbFormChange}
-                                        placeholder="TN38AB1234"
-                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-primary mb-2">Transporter Name</label>
-                                    <input
-                                        type="text"
-                                        name="transName"
-                                        value={ewbForm.transName}
-                                        onChange={handleEwbFormChange}
-                                        placeholder="ABC Logistics"
+                                        placeholder="e.g., 250"
+                                        min="1"
+                                        required
+                                        autoFocus
                                         className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
                                     />
                                 </div>
-                            </div>
-
-                            <div className="flex gap-3 pt-4">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowEwbModal(false);
-                                        setSelectedEwbInvoice(null);
-                                        setEwbForm({ distance: '', transId: '', transName: '', transGstin: '', vehicleNo: '' });
-                                    }}
-                                    className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-medium"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={generatingEwb}
-                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium disabled:opacity-70"
-                                >
-                                    {generatingEwb ? (
-                                        <>
-                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                                            Generating...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <HiOutlineTruck className="text-lg" />
-                                            Generate EWB
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* E-Way Bill Success Modal */}
-            {showEwbSuccessModal && generatedEwb && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 animate-fade-in max-h-[90vh] overflow-y-auto">
-                        <div className="text-center space-y-6">
-                            {/* Success Header */}
-                            <div className="flex items-center justify-center gap-3 text-blue-600">
-                                <HiOutlineTruck className="text-4xl" />
-                                <h2 className="text-2xl font-bold">E-Way Bill Generated!</h2>
-                            </div>
-
-                            {/* EWB Number Display */}
-                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border-2 border-blue-200">
-                                <p className="text-sm text-gray-600 mb-2">E-Way Bill Number</p>
-                                <p className="text-2xl font-mono font-bold text-blue-900 tracking-wider">
-                                    {generatedEwb.ewbNo}
-                                </p>
-                            </div>
-
-                            {/* Validity Period */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200">
-                                    <p className="text-xs text-emerald-600 mb-1">Valid From</p>
-                                    <p className="font-medium text-emerald-800">{formatDate(generatedEwb.ewbValidFrom)}</p>
-                                </div>
-                                <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
-                                    <p className="text-xs text-amber-600 mb-1">Valid Until</p>
-                                    <p className="font-medium text-amber-800">{formatDate(generatedEwb.ewbValidUpto)}</p>
-                                </div>
-                            </div>
-
-                            {/* QR Code Display */}
-                            <div className="space-y-3">
-                                <h3 className="text-lg font-semibold text-gray-800">E-Way Bill QR Code</h3>
-                                {generatedEwb.ewbQrCode ? (
-                                    <div className="bg-white p-4 rounded-xl border-4 border-blue-200 inline-block shadow-lg">
-                                        <img
-                                            src={generatedEwb.ewbQrCode}
-                                            alt="EWB QR Code"
-                                            className="w-48 h-48 mx-auto"
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-primary mb-2">Vehicle Number</label>
+                                        <input
+                                            type="text"
+                                            name="vehicleNo"
+                                            value={ewbForm.vehicleNo}
+                                            onChange={handleEwbFormChange}
+                                            placeholder="TN38AB1234"
+                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
                                         />
                                     </div>
-                                ) : (
-                                    <div className="w-48 h-48 mx-auto bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 border-2 border-dashed border-gray-300">
-                                        <HiOutlineQrcode className="text-6xl" />
+                                    <div>
+                                        <label className="block text-sm font-medium text-primary mb-2">Transporter Name</label>
+                                        <input
+                                            type="text"
+                                            name="transName"
+                                            value={ewbForm.transName}
+                                            onChange={handleEwbFormChange}
+                                            placeholder="ABC Logistics"
+                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
+                                        />
                                     </div>
-                                )}
-                                <p className="text-xs text-gray-500">Scan to verify E-Way Bill</p>
-                            </div>
+                                </div>
 
-                            {/* Action Buttons */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
-                                <button
-                                    onClick={() => {
-                                        // Print combined IRN + EWB invoice A4 layout
-                                        const invoice = generatedEwb?.invoice || selectedEwbInvoice || {};
-                                        const ewb = generatedEwb || {};
+                                <div className="flex gap-3 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowEwbModal(false);
+                                            setSelectedEwbInvoice(null);
+                                            setEwbForm({ distance: '', transId: '', transName: '', transGstin: '', vehicleNo: '' });
+                                        }}
+                                        className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-medium"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={generatingEwb}
+                                        className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium disabled:opacity-70"
+                                    >
+                                        {generatingEwb ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                                                Generating...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <HiOutlineTruck className="text-lg" />
+                                                Generate EWB
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )
+            }
 
-                                        const formatDate = (d) => {
-                                            if (!d) return '-';
-                                            const date = new Date(d);
-                                            return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-                                        };
+            {/* E-Way Bill Success Modal */}
+            {
+                showEwbSuccessModal && generatedEwb && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-8 animate-fade-in max-h-[90vh] overflow-y-auto">
+                            <div className="text-center space-y-6">
+                                {/* Success Header */}
+                                <div className="flex items-center justify-center gap-3 text-blue-600">
+                                    <HiOutlineTruck className="text-4xl" />
+                                    <h2 className="text-2xl font-bold">E-Way Bill Generated!</h2>
+                                </div>
 
-                                        const printWindow = window.open('', '_blank');
-                                        printWindow.document.write(`
-                                            <!DOCTYPE html>
-                                            <html>
-                                            <head>
-                                                <title>E-Way Bill - ${ewb.ewbNo || 'EWB'}</title>
-                                                <style>
-                                                    @page { size: A4 portrait; margin: 10mm; }
-                                                    * { box-sizing: border-box; margin: 0; padding: 0; }
-                                                    body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; line-height: 1.4; }
-                                                    .container { max-width: 210mm; margin: 0 auto; padding: 10px; }
-                                                    table { border-collapse: collapse; width: 100%; }
-                                                    .header { text-align: center; margin-bottom: 15px; border: 2px solid #000; padding: 10px; }
-                                                    .section { border: 1px solid #000; margin-bottom: 10px; }
-                                                    .section-title { background: #f0f0f0; padding: 5px 10px; font-weight: bold; border-bottom: 1px solid #000; }
-                                                    .section-content { padding: 10px; }
-                                                    .qr-section { display: flex; justify-content: space-around; align-items: center; padding: 15px; }
-                                                    .qr-box { text-align: center; }
-                                                    .qr-box img { width: 100px; height: 100px; border: 1px solid #000; }
-                                                    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-                                                    .info-row { display: flex; margin-bottom: 5px; }
-                                                    .info-label { width: 120px; font-weight: bold; }
-                                                    .info-value { flex: 1; }
-                                                    .ewb-big { font-size: 24pt; font-weight: bold; text-align: center; color: #0066cc; margin: 10px 0; }
-                                                    .valid-box { display: flex; justify-content: center; gap: 40px; margin: 15px 0; }
-                                                    .valid-item { text-align: center; padding: 10px 20px; border: 1px solid #ccc; border-radius: 8px; }
-                                                    .valid-label { font-size: 9pt; color: #666; }
-                                                    .valid-value { font-size: 12pt; font-weight: bold; }
-                                                    @media print { body { -webkit-print-color-adjust: exact !important; } }
-                                                </style>
-                                            </head>
-                                            <body>
-                                                <div class="container">
-                                                    <!-- Header -->
-                                                    <div class="header">
-                                                        <div style="font-size: 18pt; font-weight: bold; margin-bottom: 5px;">E-WAY BILL</div>
-                                                        <div style="font-size: 10pt; color: #666;">Generated via NIC Portal</div>
-                                                    </div>
-                                                    
-                                                    <!-- EWB Number -->
-                                                    <div class="section">
-                                                        <div class="ewb-big">${ewb.ewbNo || 'EWB Number'}</div>
-                                                        <div class="valid-box">
-                                                            <div class="valid-item">
-                                                                <div class="valid-label">Valid From</div>
-                                                                <div class="valid-value" style="color: #22c55e;">${formatDate(ewb.ewbValidFrom)}</div>
-                                                            </div>
-                                                            <div class="valid-item">
-                                                                <div class="valid-label">Valid Until</div>
-                                                                <div class="valid-value" style="color: #ef4444;">${formatDate(ewb.ewbValidUpto)}</div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <!-- QR Codes Section -->
-                                                    <div class="section">
-                                                        <div class="section-title">Verification QR Codes</div>
-                                                        <div class="qr-section">
-                                                            <div class="qr-box">
-                                                                ${invoice.irn && generatedIRN?.qrcode ? `<img src="${generatedIRN.qrcode}" alt="IRN QR"/>` : '<div style="width: 100px; height: 100px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center;">IRN QR</div>'}
-                                                                <div style="margin-top: 5px; font-weight: bold;">IRN QR</div>
-                                                                <div style="font-size: 8pt; color: #666;">Scan for e-Invoice</div>
-                                                            </div>
-                                                            <div class="qr-box">
-                                                                ${ewb.ewbQrCode ? `<img src="${ewb.ewbQrCode}" alt="EWB QR"/>` : '<div style="width: 100px; height: 100px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center;">EWB QR</div>'}
-                                                                <div style="margin-top: 5px; font-weight: bold;">E-Way Bill QR</div>
-                                                                <div style="font-size: 8pt; color: #666;">Scan for EWB</div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <!-- Document Details -->
-                                                    <div class="section">
-                                                        <div class="section-title">Document Details</div>
-                                                        <div class="section-content grid-2">
-                                                            <div>
-                                                                <div class="info-row"><span class="info-label">Doc Type:</span><span class="info-value">Tax Invoice</span></div>
-                                                                <div class="info-row"><span class="info-label">Doc No:</span><span class="info-value">${invoice.invoice_number || 'N/A'}</span></div>
-                                                                <div class="info-row"><span class="info-label">Doc Date:</span><span class="info-value">${formatDate(invoice.invoice_date)}</span></div>
-                                                            </div>
-                                                            <div>
-                                                                <div class="info-row"><span class="info-label">IRN:</span><span class="info-value" style="font-size: 8pt; word-break: break-all;">${invoice.irn || 'N/A'}</span></div>
-                                                                <div class="info-row"><span class="info-label">Value:</span><span class="info-value" style="font-weight: bold;">₹ ${(invoice.total_amount || 0).toLocaleString('en-IN')}</span></div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <!-- From / To Details -->
-                                                    <div class="section">
-                                                        <div class="section-title">Consignment Details</div>
-                                                        <div class="section-content grid-2">
-                                                            <div style="border-right: 1px solid #ccc; padding-right: 10px;">
-                                                                <div style="font-weight: bold; margin-bottom: 5px; color: #0066cc;">FROM (Consignor)</div>
-                                                                <div class="info-row"><span class="info-label">Name:</span><span class="info-value">${invoice.supplier_name || selectedBusiness?.name || 'Breeze Techniques'}</span></div>
-                                                                <div class="info-row"><span class="info-label">GSTIN:</span><span class="info-value">${invoice.supplier_gstin || selectedBusiness?.gstin || '33AABCT1234A1Z5'}</span></div>
-                                                                <div class="info-row"><span class="info-label">State:</span><span class="info-value">Tamil Nadu (33)</span></div>
-                                                            </div>
-                                                            <div style="padding-left: 10px;">
-                                                                <div style="font-weight: bold; margin-bottom: 5px; color: #dc2626;">TO (Consignee)</div>
-                                                                <div class="info-row"><span class="info-label">Name:</span><span class="info-value">${invoice.recipient_name || 'N/A'}</span></div>
-                                                                <div class="info-row"><span class="info-label">GSTIN:</span><span class="info-value">${invoice.recipient_gstin || 'N/A'}</span></div>
-                                                                <div class="info-row"><span class="info-label">State:</span><span class="info-value">-</span></div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <!-- Transport Details -->
-                                                    <div class="section">
-                                                        <div class="section-title">Transport Details</div>
-                                                        <div class="section-content grid-2">
-                                                            <div>
-                                                                <div class="info-row"><span class="info-label">Mode:</span><span class="info-value">Road</span></div>
-                                                                <div class="info-row"><span class="info-label">Distance:</span><span class="info-value">${ewb.distance || ewbForm?.distance || '-'} km</span></div>
-                                                                <div class="info-row"><span class="info-label">Vehicle No:</span><span class="info-value">${ewb.vehicleNo || ewbForm?.vehicleNo || '-'}</span></div>
-                                                            </div>
-                                                            <div>
-                                                                <div class="info-row"><span class="info-label">Transporter:</span><span class="info-value">${ewb.transName || ewbForm?.transName || '-'}</span></div>
-                                                                <div class="info-row"><span class="info-label">Trans GSTIN:</span><span class="info-value">${ewb.transGstin || ewbForm?.transGstin || '-'}</span></div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    <!-- Footer -->
-                                                    <div style="margin-top: 20px; text-align: center; font-size: 9pt; color: #666;">
-                                                        <p>This is a computer generated document. No signature required.</p>
-                                                        <p>Generated by Breeze Techniques Inventory System</p>
-                                                    </div>
-                                                </div>
-                                            </body>
-                                            </html>
-                                        `);
-                                        printWindow.document.close();
-                                        printWindow.focus();
-                                        setTimeout(() => printWindow.print(), 300);
-                                    }}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-blue-600 text-blue-600 rounded-xl hover:bg-blue-50 transition-colors font-medium"
-                                >
-                                    <HiOutlinePrinter className="text-lg" />
-                                    🖨️ Print Combined Invoice
-                                </button>
-                                <button
-                                    onClick={() => setShowEwbSuccessModal(false)}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium"
-                                >
-                                    Close
-                                </button>
+                                {/* EWB Number Display */}
+                                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border-2 border-blue-200">
+                                    <p className="text-sm text-gray-600 mb-2">E-Way Bill Number</p>
+                                    <p className="text-2xl font-mono font-bold text-blue-900 tracking-wider">
+                                        {generatedEwb.ewbNo}
+                                    </p>
+                                </div>
+
+                                {/* Validity Period */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200">
+                                        <p className="text-xs text-emerald-600 mb-1">Valid From</p>
+                                        <p className="font-medium text-emerald-800">{formatDate(generatedEwb.ewbValidFrom)}</p>
+                                    </div>
+                                    <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
+                                        <p className="text-xs text-amber-600 mb-1">Valid Until</p>
+                                        <p className="font-medium text-amber-800">{formatDate(generatedEwb.ewbValidUpto)}</p>
+                                    </div>
+                                </div>
+
+                                {/* QR Code Display */}
+                                <div className="space-y-3">
+                                    <h3 className="text-lg font-semibold text-gray-800">E-Way Bill QR Code</h3>
+                                    {generatedEwb.ewbQrCode ? (
+                                        <div className="bg-white p-4 rounded-xl border-4 border-blue-200 inline-block shadow-lg">
+                                            <img
+                                                src={generatedEwb.ewbQrCode}
+                                                alt="EWB QR Code"
+                                                className="w-48 h-48 mx-auto"
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="w-48 h-48 mx-auto bg-gray-100 rounded-xl flex items-center justify-center text-gray-500 border-2 border-dashed border-gray-300">
+                                            <HiOutlineQrcode className="text-6xl" />
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-gray-500">Scan to verify E-Way Bill</p>
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                                    <button
+                                        onClick={() => {
+                                            const ewb = generatedEwb || {};
+                                            const invoice = generatedEwb?.invoice || selectedEwbInvoice || {};
+
+                                            // Create temporary element for PDF generation using reusable template
+                                            const element = document.createElement('div');
+                                            element.innerHTML = getEwayBillTemplate(ewb, invoice);
+                                            element.style.position = 'absolute';
+                                            element.style.top = '-10000px';
+                                            element.style.left = '-10000px';
+                                            element.style.background = 'white';
+                                            document.body.appendChild(element);
+
+                                            const opt = {
+                                                margin: 5,
+                                                filename: `EWayBill-${ewb.ewbNo || 'draft'}.pdf`,
+                                                image: { type: 'jpeg', quality: 0.98 },
+                                                html2canvas: { scale: 2 },
+                                                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                                            };
+
+                                            html2pdf().set(opt).from(element).save().then(() => {
+                                                document.body.removeChild(element);
+                                            });
+                                        }}
+                                        className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-blue-600 text-blue-600 rounded-xl hover:bg-blue-50 transition-colors font-medium"
+                                    >
+                                        <HiOutlineDownload className="text-lg" />
+                                        Download E-Way Bill
+                                    </button>
+                                    <button
+                                        onClick={() => setShowEwbSuccessModal(false)}
+                                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
         </div>
     );
 };
 
-export default EInvoice;
 
+export default EInvoice;

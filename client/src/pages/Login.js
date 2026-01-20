@@ -4,8 +4,8 @@ import api from '../utils/axios';
 import { HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
 
 function Login() {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
+    const [email, setEmail] = useState('chairwoman@breeze.com');
+    const [password, setPassword] = useState('chairwoman123');
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -141,6 +141,15 @@ function Login() {
                         <Link to="/register" className="font-bold text-[#0C3834] hover:underline">
                             Register Now
                         </Link>
+                    </p>
+                </div>
+
+                <div>
+                    <p className="text-sm text-[#0C3834]/70">
+                        Email: chairwoman@breeze.com
+                    </p>
+                    <p className="text-sm text-[#0C3834]/70">
+                        Password: chairwoman123
                     </p>
                 </div>
             </div>

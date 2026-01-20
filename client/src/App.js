@@ -11,9 +11,16 @@ import Settings from './pages/Settings';
 import Profile from './pages/Profile';
 import Layout from './components/Layout';
 import Invoice from './pages/Invoice';
+import DeliveryChallan from './pages/DeliveryChallan';
 import FinishedProducts from './pages/FinishedProducts';
 import GSTUpload from './pages/GSTUpload';
 import EInvoice from './pages/EInvoice';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import Register from './pages/Register';
+import MailConfirmation from './pages/MailConfirmation';
+import Bills from './pages/Bills';
+import Upload from './pages/Upload';
 
 const ProtectedRoute = ({ children, permission }) => {
   const { token, hasPermission } = useAuth();
@@ -38,6 +45,22 @@ const AppRoutes = () => {
       <Route
         path="/login"
         element={token ? <Navigate to="/dashboard" replace /> : <Login />}
+      />
+      <Route
+        path="/register"
+        element={token ? <Navigate to="/dashboard" replace /> : <Register />}
+      />
+      <Route
+        path="/mail-confirmation"
+        element={token ? <Navigate to="/dashboard" replace /> : <MailConfirmation />}
+      />
+      <Route
+        path="/forgot-password"
+        element={token ? <Navigate to="/dashboard" replace /> : <ForgotPassword />}
+      />
+      <Route
+        path="/reset-password"
+        element={token ? <Navigate to="/dashboard" replace /> : <ResetPassword />}
       />
       <Route
         path="/"
@@ -118,11 +141,41 @@ const AppRoutes = () => {
         }
       />
       <Route
+        path="/bills"
+        element={
+          <ProtectedRoute permission="viewInventory">
+            <Layout>
+              <Bills />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/upload"
+        element={
+          <ProtectedRoute permission="viewInventory">
+            <Layout>
+              <Upload />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/invoice"
         element={
           <ProtectedRoute permission="viewInventory">
             <Layout>
               <Invoice />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/delivery-challan"
+        element={
+          <ProtectedRoute permission="viewInventory">
+            <Layout>
+              <DeliveryChallan />
             </Layout>
           </ProtectedRoute>
         }
