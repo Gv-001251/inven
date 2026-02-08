@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import html2pdf from 'html2pdf.js';
+import { BlobProvider, pdf } from '@react-pdf/renderer';
 import {
     HiOutlineDocumentText,
     HiOutlineCheckCircle,
@@ -18,6 +18,9 @@ import {
 } from 'react-icons/hi';
 import api from '../utils/axios';
 import { useAuth } from '../context/AuthContext';
+import InvoicePDF from '../components/einvoice/InvoicePDF';
+import EWayBillPDF from '../components/einvoice/EWayBillPDF';
+import InvoiceEditorSimple from '../components/einvoice/InvoiceEditorSimple';
 
 // Breeze Tech HSN Master - 4-digit codes (GST compliant for <₹5Cr turnover)
 const DEFAULT_HSN_CODES = [
@@ -92,10 +95,28 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
         invoiceDate: new Date().toISOString().split('T')[0],
         recipientGstin: '',
         recipientName: '',
+        recipientAddress: '',
+        recipientPhone: '',
+        recipientEmail: '',
         recipientState: '33',
         recipientPin: '',
+        recipientCountry: '',
+        placeOfSupply: '',
+        // Reference details
+        eInvoiceNo: '',
+        deliveryNote: '',
+        modeOfPayment: '',
+        supplierRef: '',
+        otherReferences: '',
+        buyerOrderNo: '',
+        buyerOrderDate: '',
+        dispatchDocNo: '',
+        deliveryNoteDate: '',
+        despatchedThrough: '',
+        destination: '',
+        termsOfDelivery: '',
         items: [
-            { id: 1, product: '', hsn: '8414', qty: 1, rate: 0, gstPercent: 18 }
+            { id: 1, product: '', hsn: '8414', qty: 1, unit: 'Nos', rate: 0, gstPercent: 18 }
         ],
         vehicleNumber: '',
         transportDistance: ''
@@ -111,23 +132,48 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
     const [message, setMessage] = useState(null);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
     const [generatedIRN, setGeneratedIRN] = useState(null);
+    const [missingFields, setMissingFields] = useState([]); // Track missing required fields
 
     // E-Way Bill state
     const [ewbInvoices, setEwbInvoices] = useState([]);
     const [ewbLoading, setEwbLoading] = useState(false);
     const [selectedEwbInvoice, setSelectedEwbInvoice] = useState(null);
     const [ewbForm, setEwbForm] = useState({
+        // Transportation details (user input)
         distance: '',
         transId: '',
         transName: '',
         transGstin: '',
-        vehicleNo: ''
+        vehicleNo: '',
+
+        // Auto-populated from invoice (synced automatically)
+        supplierName: '',
+        supplierAddress: '',
+        supplierGstin: '',
+        recipientName: '',
+        recipientAddress: '',
+        recipientGstin: '',
+        recipientState: '',
+        invoiceNumber: '',
+        invoiceDate: '',
+        irn: '',
+        productDescription: '',
+        hsnCode: '',
+        quantity: 0,
+        taxableValue: 0,
+        invoiceValue: 0,
+        dispatchFrom: '',
+        destination: '',
+        despatchedThrough: ''
     });
     const [showEwbModal, setShowEwbModal] = useState(false);
 
     const [showEwbSuccessModal, setShowEwbSuccessModal] = useState(false);
     const [generatedEwb, setGeneratedEwb] = useState(null);
     const [generatingEwb, setGeneratingEwb] = useState(false);
+
+    // Editor section state - default to 'items' to show form immediately
+    const [activeSection, setActiveSection] = useState('items');
 
     // Helpers
     const formatINR = (val) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val || 0);
@@ -442,6 +488,8 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
         }
     }, [activeTab, selectedBusiness]);
 
+
+
     const loadHistory = async () => {
         try {
             setHistoryLoading(true);
@@ -539,15 +587,9 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                 loadHistory();
                 loadStats();
 
-                // Reset form
-                setEwbForm({
-                    distance: '',
-                    transId: '',
-                    transName: '',
-                    transGstin: '',
-                    vehicleNo: ''
-                });
-                setSelectedEwbInvoice(null);
+                // Form data persisted until manual reset
+                // setEwbForm(prev => ({ ... }));
+                // setSelectedEwbInvoice(null);
             } else {
                 setMessage({ type: 'error', text: data.message || 'Failed to generate E-Way Bill.' });
             }
@@ -558,6 +600,197 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
             setGeneratingEwb(false);
         }
     };
+
+    // Download E-Way Bill PDF
+    const downloadEwbPDF = async () => {
+        try {
+            if (!generatedEwb) {
+                setMessage({ type: 'error', text: 'No E-Way Bill data available.' });
+                return;
+            }
+
+            // Prepare data for EWayBillPDF component
+            const ewbData = {
+                ewbNumber: generatedEwb.ewbNo,
+                generatedDate: generatedEwb.ewbValidFrom,
+                validUntil: generatedEwb.ewbValidUpto,
+                irn: generatedEwb.invoice?.irn || ewbForm.irn,
+
+                // Supplier details
+                supplierName: generatedEwb.invoice?.supplier_name || ewbForm.supplierName || selectedBusiness.name,
+                supplierAddress: generatedEwb.invoice?.supplier_address || ewbForm.supplierAddress || selectedBusiness.address,
+                supplierGstin: generatedEwb.invoice?.supplier_gstin || ewbForm.supplierGstin || selectedBusiness.gstin,
+
+                // Recipient details
+                recipientName: generatedEwb.invoice?.recipient_name || ewbForm.recipientName,
+                recipientAddress: generatedEwb.invoice?.recipient_address || ewbForm.recipientAddress,
+                recipientGstin: generatedEwb.invoice?.recipient_gstin || ewbForm.recipientGstin,
+
+                // Product details
+                productDescription: ewbForm.productDescription || 'Products',
+                hsnCode: ewbForm.hsnCode,
+                quantity: ewbForm.quantity,
+
+                // Financial details
+                taxableValue: ewbForm.taxableValue,
+                invoiceValue: ewbForm.invoiceValue,
+
+                // Transportation details
+                transporterName: generatedEwb.transName || ewbForm.transName,
+                transporterId: ewbForm.transId,
+                transportMode: 'Road',
+                vehicleNumber: generatedEwb.vehicleNo || ewbForm.vehicleNo,
+                distance: generatedEwb.distance,
+
+                // Invoice details
+                invoiceNumber: generatedEwb.invoice?.invoice_number || ewbForm.invoiceNumber,
+                invoiceDate: generatedEwb.invoice?.invoice_date || ewbForm.invoiceDate,
+
+                // Logistics
+                dispatchFrom: ewbForm.dispatchFrom,
+                destination: ewbForm.destination,
+                despatchedThrough: ewbForm.despatchedThrough
+            };
+
+            // Generate PDF blob
+            const blob = await pdf(<EWayBillPDF data={ewbData} qrCode={generatedEwb.ewbQrCode} />).toBlob();
+
+            // Create download link
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `EWayBill_${generatedEwb.ewbNo}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            setMessage({ type: 'success', text: 'E-Way Bill PDF downloaded successfully!' });
+        } catch (error) {
+            console.error('PDF download error:', error);
+            setMessage({ type: 'error', text: 'Failed to download E-Way Bill PDF.' });
+        }
+    };
+
+    // History Action Handlers
+    const [selectedRecord, setSelectedRecord] = useState(null);
+    const [showQRModal, setShowQRModal] = useState(false);
+
+    // View QR Code for a record
+    const viewQRCode = (record) => {
+        setSelectedRecord(record);
+        setShowQRModal(true);
+    };
+
+    // Download invoice PDF for a history record
+    const downloadInvoicePDF = async (record) => {
+        try {
+            // Prepare data from record
+            const invoiceData = {
+                supplierName: record.supplier_name || selectedBusiness.name,
+                supplierAddress: selectedBusiness.address,
+                supplierPhone: selectedBusiness.phone,
+                supplierGstin: record.supplier_gstin,
+                supplierState: selectedBusiness.stateCode,
+                invoiceNumber: record.invoice_number,
+                invoiceDate: record.invoice_date,
+                recipientName: record.recipient_name,
+                recipientAddress: record.recipient_address,
+                recipientGstin: record.recipient_gstin,
+                items: record.items || [],
+                totals: {
+                    taxableValue: record.taxable_amount,
+                    cgst: record.cgst,
+                    sgst: record.sgst,
+                    igst: record.igst,
+                    invoiceTotal: record.total_amount
+                }
+            };
+
+            // Generate PDF
+            const blob = await pdf(<InvoicePDF data={invoiceData} qrCode={record.qrcode} irn={record.irn} ackNo={null} />).toBlob();
+
+            // Download
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Invoice_${record.invoice_number}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            setMessage({ type: 'success', text: 'Invoice PDF downloaded successfully!' });
+        } catch (error) {
+            console.error('PDF download error:', error);
+            setMessage({ type: 'error', text: 'Failed to download invoice PDF.' });
+        }
+    };
+
+    // Download E-Way Bill PDF for a history record
+    const downloadHistoryEwbPDF = async (record) => {
+        try {
+            if (!record.ewb_no) {
+                setMessage({ type: 'error', text: 'No E-Way Bill available for this record.' });
+                return;
+            }
+
+            const ewbData = {
+                ewbNumber: record.ewb_no,
+                generatedDate: record.ewb_generated_at,
+                validUntil: record.ewb_valid_upto,
+                irn: record.irn,
+                supplierName: record.supplier_name,
+                supplierGstin: record.supplier_gstin,
+                recipientName: record.recipient_name,
+                recipientGstin: record.recipient_gstin,
+                invoiceNumber: record.invoice_number,
+                invoiceDate: record.invoice_date,
+                invoiceValue: record.total_amount,
+                vehicleNumber: record.ewb_vehicle_no,
+                distance: record.ewb_distance,
+                transporterName: record.ewb_transporter_name
+            };
+
+            const blob = await pdf(<EWayBillPDF data={ewbData} qrCode={record.ewb_qrcode} />).toBlob();
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `EWayBill_${record.ewb_no}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            setMessage({ type: 'success', text: 'E-Way Bill PDF downloaded successfully!' });
+        } catch (error) {
+            console.error('EWB PDF download error:', error);
+            setMessage({ type: 'error', text: 'Failed to download E-Way Bill PDF.' });
+        }
+    };
+
+    // Download JSON data
+    const downloadJSON = (record) => {
+        try {
+            const jsonData = JSON.stringify(record, null, 2);
+            const blob = new Blob([jsonData], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `IRN_${record.invoice_number}_${record.id}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            setMessage({ type: 'success', text: 'JSON data downloaded successfully!' });
+        } catch (error) {
+            console.error('JSON download error:', error);
+            setMessage({ type: 'error', text: 'Failed to download JSON data.' });
+        }
+    };
+
 
     // Open EWB modal from IRN success modal
     const openEwbFromIrn = () => {
@@ -637,6 +870,68 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
         };
     }, [invoiceForm.items, invoiceForm.recipientState, selectedBusiness]);
 
+    // Auto-populate E-Way Bill form from Invoice form data
+    useEffect(() => {
+        // Get first item or aggregate all items
+        const firstItem = invoiceForm.items[0] || {};
+        const allProducts = invoiceForm.items.map(i => i.product).filter(Boolean).join(', ');
+        const totalQty = invoiceForm.items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+
+        setEwbForm(prev => ({
+            ...prev,
+            // Supplier details from selected business
+            supplierName: selectedBusiness.name || '',
+            supplierAddress: selectedBusiness.address || '',
+            supplierGstin: selectedBusiness.gstin || '',
+
+            // Recipient details from invoice form
+            recipientName: invoiceForm.recipientName || '',
+            recipientAddress: invoiceForm.recipientAddress || '',
+            recipientGstin: invoiceForm.recipientGstin || '',
+            recipientState: invoiceForm.recipientState || '',
+
+            // Invoice details
+            invoiceNumber: invoiceForm.invoiceNumber || '',
+            invoiceDate: invoiceForm.invoiceDate || '',
+
+            // Product details (from items)
+            productDescription: allProducts || firstItem.product || '',
+            hsnCode: firstItem.hsn || '',
+            quantity: totalQty,
+
+            // Financial details (from totals)
+            taxableValue: totals?.taxableValue || 0,
+            invoiceValue: totals?.invoiceTotal || 0,
+
+            // Logistics details from invoice form
+            dispatchFrom: invoiceForm.recipientAddress || selectedBusiness.address || '',
+            destination: invoiceForm.destination || invoiceForm.recipientAddress || '',
+            despatchedThrough: invoiceForm.despatchedThrough || prev.transName || '',
+
+            // Keep user-entered transportation details (don't overwrite)
+            distance: prev.distance,
+            transId: prev.transId,
+            transName: prev.transName || invoiceForm.despatchedThrough || '',
+            transGstin: prev.transGstin,
+            vehicleNo: prev.vehicleNo
+        }));
+    }, [invoiceForm, selectedBusiness, totals]);
+
+    // Filter history based on search term
+    const filteredHistory = useMemo(() => {
+        if (!searchTerm.trim()) return history;
+
+        const term = searchTerm.toLowerCase();
+        return history.filter(record =>
+            record.invoice_number?.toLowerCase().includes(term) ||
+            record.recipient_name?.toLowerCase().includes(term) ||
+            record.recipient_gstin?.toLowerCase().includes(term) ||
+            record.irn?.toLowerCase().includes(term) ||
+            record.ewb_no?.toLowerCase().includes(term)
+        );
+    }, [history, searchTerm]);
+
+
     // Handle form changes
     const handleFormChange = (e) => {
         const { name, value } = e.target;
@@ -673,27 +968,144 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
         }));
     };
 
-    // Generate IRN
+    // Reset all forms for new invoice
+    const handleNewInvoice = () => {
+        // Reset Invoice Form
+        setInvoiceForm({
+            invoiceType: 'sales',
+            invoiceNumber: '',
+            invoiceDate: new Date().toISOString().split('T')[0],
+            recipientGstin: '',
+            recipientName: '',
+            recipientAddress: '',
+            recipientPhone: '',
+            recipientEmail: '',
+            recipientState: '33',
+            recipientPin: '',
+            recipientCountry: '',
+            placeOfSupply: '',
+            eInvoiceNo: '',
+            deliveryNote: '',
+            modeOfPayment: '',
+            supplierRef: '',
+            otherReferences: '',
+            buyerOrderNo: '',
+            buyerOrderDate: '',
+            dispatchDocNo: '',
+            deliveryNoteDate: '',
+            despatchedThrough: '',
+            destination: '',
+            termsOfDelivery: '',
+            items: [
+                { id: 1, product: '', hsn: '8414', qty: 1, unit: 'Nos', rate: 0, gstPercent: 18 }
+            ],
+            vehicleNumber: '',
+            transportDistance: ''
+        });
+
+        // Reset E-Way Bill Form
+        setEwbForm(prev => ({
+            ...prev,
+            distance: '',
+            transId: '',
+            transName: '',
+            transGstin: '',
+            vehicleNo: '',
+            // Don't reset auto-populated fields from invoice as they will update when invoice form updates or invoice is selected
+        }));
+
+        // Reset other states
+        setGeneratedIRN(null);
+        setGeneratedEwb(null);
+        setSelectedEwbInvoice(null);
+        setMessage(null);
+        setMissingFields([]);
+        setShowSuccessModal(false);
+    };
+
+    // Generate IRN with comprehensive validation
     const handleGenerateIRN = async (e) => {
         e.preventDefault();
         setMessage(null);
+        setMissingFields([]); // Reset missing fields
 
-        // Validation
-        if (!invoiceForm.recipientGstin || invoiceForm.recipientGstin.length !== 15) {
-            setMessage({ type: 'error', text: 'Please enter a valid 15-character GSTIN.' });
-            return;
+        // Define required fields
+        const requiredFields = {
+            // Bill To (Customer Details)
+            recipientName: 'Customer Name',
+            recipientGstin: 'GST Number',
+            recipientPhone: 'Phone Number',
+            recipientEmail: 'Email',
+            recipientAddress: 'Address',
+            recipientCountry: 'Country',
+            placeOfSupply: 'Place of Supply',
+
+            // Invoice Details
+            invoiceNumber: 'Invoice Number',
+            invoiceDate: 'Invoice Date',
+
+            // Reference Details
+            eInvoiceNo: 'e-Invoice No.',
+            deliveryNote: 'Delivery Note',
+            modeOfPayment: 'Mode/Terms of Payment',
+            supplierRef: "Supplier's Ref.",
+            otherReferences: 'Other Reference(s)',
+            buyerOrderNo: "Buyer's Order No.",
+            buyerOrderDate: 'Buyer Order Date',
+            dispatchDocNo: 'Despatch Document No.',
+            deliveryNoteDate: 'Delivery Note Date',
+            despatchedThrough: 'Despatched Through',
+            destination: 'Destination',
+            termsOfDelivery: 'Terms of Delivery'
+        };
+
+        // Check for missing fields
+        const missing = [];
+        Object.keys(requiredFields).forEach(field => {
+            const value = invoiceForm[field];
+            if (!value || (typeof value === 'string' && value.trim() === '')) {
+                missing.push({
+                    field,
+                    label: requiredFields[field]
+                });
+            }
+        });
+
+        // Validate GSTIN format specifically
+        if (invoiceForm.recipientGstin && invoiceForm.recipientGstin.length !== 15) {
+            if (!missing.find(m => m.field === 'recipientGstin')) {
+                missing.push({
+                    field: 'recipientGstin',
+                    label: 'GST Number (must be 15 characters)'
+                });
+            }
         }
 
-        if (!invoiceForm.invoiceNumber) {
-            setMessage({ type: 'error', text: 'Invoice number is required.' });
-            return;
-        }
-
+        // Validate items
         const hasValidItems = invoiceForm.items.every(item =>
             item.product && item.hsn && item.qty > 0 && item.rate > 0
         );
         if (!hasValidItems) {
-            setMessage({ type: 'error', text: 'Please fill all item details (Product, HSN, Qty, Rate).' });
+            missing.push({
+                field: 'items',
+                label: 'Item Details (Product, HSN, Qty, Rate)'
+            });
+        }
+
+        // If there are missing fields, highlight them with overlays
+        if (missing.length > 0) {
+            setMissingFields(missing.map(m => m.field));
+
+            // Scroll to first missing field
+            setTimeout(() => {
+                const firstMissingField = missing[0].field;
+                const element = document.querySelector(`[name="${firstMissingField}"]`);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    element.focus();
+                }
+            }, 100);
+
             return;
         }
 
@@ -703,14 +1115,33 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
             const payload = {
                 supplierGstin: selectedBusiness.gstin,
                 supplierName: selectedBusiness.name,
+                supplierAddress: selectedBusiness.address,
+                supplierPhone: selectedBusiness.phone,
                 supplierState: selectedBusiness.stateCode,
                 invoiceType: invoiceForm.invoiceType,
                 invoiceNumber: invoiceForm.invoiceNumber,
                 invoiceDate: invoiceForm.invoiceDate,
+                eInvoiceNo: invoiceForm.eInvoiceNo,
+                deliveryNote: invoiceForm.deliveryNote,
                 recipientGstin: invoiceForm.recipientGstin,
                 recipientName: invoiceForm.recipientName,
+                recipientAddress: invoiceForm.recipientAddress,
+                recipientPhone: invoiceForm.recipientPhone,
+                recipientEmail: invoiceForm.recipientEmail,
                 recipientState: invoiceForm.recipientState,
                 recipientPin: invoiceForm.recipientPin,
+                recipientCountry: invoiceForm.recipientCountry || 'India',
+                placeOfSupply: invoiceForm.placeOfSupply,
+                modeOfPayment: invoiceForm.modeOfPayment,
+                supplierRef: invoiceForm.supplierRef,
+                otherReferences: invoiceForm.otherReferences,
+                buyerOrderNo: invoiceForm.buyerOrderNo,
+                buyerOrderDate: invoiceForm.buyerOrderDate,
+                dispatchDocNo: invoiceForm.dispatchDocNo,
+                deliveryNoteDate: invoiceForm.deliveryNoteDate,
+                despatchedThrough: invoiceForm.despatchedThrough,
+                destination: invoiceForm.destination,
+                termsOfDelivery: invoiceForm.termsOfDelivery,
                 items: invoiceForm.items,
                 totals: totals
             };
@@ -718,13 +1149,18 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
             const { data } = await api.post('/einvoice/generate-irn', payload);
 
             if (data.success) {
+                if (data.warning) {
+                    setMessage({ type: 'error', text: data.message });
+                } else {
+                    setMessage({ type: 'success', text: 'IRN generated successfully!' });
+                }
+
                 // Store complete invoice data for printing
                 setGeneratedIRN({
                     ...data,
                     invoiceData: payload // Store the full invoice for print
                 });
                 setShowSuccessModal(true);
-                setMessage({ type: 'success', text: 'IRN generated successfully!' });
 
                 // Cache transportation details for E-Way Bill
                 try {
@@ -739,15 +1175,8 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                 loadStats();
                 loadEwbInvoices();
 
-                // Reset form
-                setInvoiceForm(prev => ({
-                    ...prev,
-                    invoiceNumber: '',
-                    recipientGstin: '',
-                    recipientName: '',
-                    recipientPin: '',
-                    items: [{ id: 1, product: '', hsn: '8414', qty: 1, rate: 0, gstPercent: 18 }]
-                }));
+                // Form data persisted until manual reset
+                // setInvoiceForm({ ... });
             } else {
                 setMessage({ type: 'error', text: data.message || 'Failed to generate IRN.' });
             }
@@ -778,12 +1207,7 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
         }).format(amount || 0);
     };
 
-    // Filter history
-    const filteredHistory = history.filter(record =>
-        record.invoice_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        record.irn?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        record.recipient_name?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+
 
     // Reusable E-Way Bill Template Function
     const getEwayBillTemplate = (ewbData, invoiceData) => {
@@ -943,23 +1367,32 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                 <div>
                     <h1 className="text-3xl font-extrabold text-primary">E-Invoice Generation</h1>
-                    <p className="text-primary/60 text-sm mt-1">Generate IRN directly like Tally Prime</p>
                 </div>
 
-                {/* Business Selector */}
-                <div className="flex items-center gap-3">
-                    <label className="text-sm font-medium text-primary/80">Business:</label>
-                    <select
-                        value={selectedBusiness.id}
-                        onChange={(e) => setSelectedBusiness(SAMPLE_BUSINESSES.find(b => b.id === e.target.value))}
-                        className="bg-white border border-primary/20 rounded-lg px-4 py-2 text-sm text-primary focus:outline-none focus:border-primary shadow-sm"
+                {/* Business Selector and Actions */}
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={handleNewInvoice}
+                        className="bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 transition-colors shadow-sm font-medium flex items-center gap-2"
                     >
-                        {SAMPLE_BUSINESSES.map(business => (
-                            <option key={business.id} value={business.id}>
-                                {business.name} ({business.gstin})
-                            </option>
-                        ))}
-                    </select>
+                        <HiOutlinePlus className="text-lg" />
+                        New E-invoice
+                    </button>
+
+                    <div className="flex items-center gap-3 border-l pl-4 border-gray-300">
+                        <label className="text-sm font-medium text-primary/80">Business:</label>
+                        <select
+                            value={selectedBusiness.id}
+                            onChange={(e) => setSelectedBusiness(SAMPLE_BUSINESSES.find(b => b.id === e.target.value))}
+                            className="bg-white border border-primary/20 rounded-lg px-4 py-2 text-sm text-primary focus:outline-none focus:border-primary shadow-sm"
+                        >
+                            {SAMPLE_BUSINESSES.map(business => (
+                                <option key={business.id} value={business.id}>
+                                    {business.name} ({business.gstin})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -979,9 +1412,9 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
             )}
 
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                {/* Pending IRN */}
-                <div className="bg-white rounded-2xl p-6 shadow-lg border border-amber-100">
+            {/* <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8"> */}
+            {/* Pending IRN */}
+            {/* <div className="bg-white rounded-2xl p-6 shadow-lg border border-amber-100">
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm text-amber-600 font-medium">Pending IRN</p>
@@ -991,10 +1424,10 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                             <HiOutlineClock className="text-2xl text-amber-600" />
                         </div>
                     </div>
-                </div>
+                </div> */}
 
-                {/* Success Today */}
-                <div className="bg-white rounded-2xl p-6 shadow-lg border border-emerald-100">
+            {/* Success Today */}
+            {/* <div className="bg-white rounded-2xl p-6 shadow-lg border border-emerald-100">
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm text-emerald-600 font-medium">Success Today</p>
@@ -1004,10 +1437,10 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                             <HiOutlineCheckCircle className="text-2xl text-emerald-600" />
                         </div>
                     </div>
-                </div>
+                </div> */}
 
-                {/* Failed */}
-                <div className="bg-white rounded-2xl p-6 shadow-lg border border-red-100">
+            {/* Failed */}
+            {/* <div className="bg-white rounded-2xl p-6 shadow-lg border border-red-100">
                     <div className="flex items-center justify-between">
                         <div>
                             <p className="text-sm text-red-600 font-medium">Failed</p>
@@ -1018,7 +1451,7 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                         </div>
                     </div>
                 </div>
-            </div>
+            </div> */}
 
             {/* Tabs - 3 Tab Layout */}
             <div className="bg-white rounded-t-2xl border-b border-gray-200">
@@ -1049,492 +1482,350 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
 
             {/* Tab Content */}
             <div className="bg-white rounded-b-2xl shadow-lg p-6">
-                {/* Generate IRN Tab */}
+                {/* Generate IRN Tab - SPLIT LAYOUT */}
                 {activeTab === 'sales' && (
-                    <form onSubmit={handleGenerateIRN}>
-                        {/* Invoice Type Toggle */}
-                        <div className="mb-6">
-                            <label className="block text-sm font-medium text-primary mb-2">Invoice Type</label>
-                            <div className="flex gap-4">
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="invoiceType"
-                                        value="sales"
-                                        checked={invoiceForm.invoiceType === 'sales'}
-                                        onChange={handleFormChange}
-                                        className="w-4 h-4 text-primary"
-                                    />
-                                    <span className="text-sm text-primary">Sales Invoice</span>
-                                </label>
-                                <label className="flex items-center gap-2 cursor-pointer">
-                                    <input
-                                        type="radio"
-                                        name="invoiceType"
-                                        value="purchase"
-                                        checked={invoiceForm.invoiceType === 'purchase'}
-                                        onChange={handleFormChange}
-                                        className="w-4 h-4 text-primary"
-                                    />
-                                    <span className="text-sm text-primary">Purchase Invoice</span>
-                                </label>
-                            </div>
-                        </div>
+                    <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
+                        {/* LEFT SIDE: VISUAL PREVIEW */}
+                        <div className="w-full lg:w-1/2 overflow-y-auto bg-gray-100/50 p-4 lg:p-8 scrollbar-thin scrollbar-thumb-gray-300">
+                            {/* <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest">PDF Preview</h2>
+                            </div> */}
 
-                        {/* Invoice Details */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                            <div>
-                                <label className="block text-sm font-medium text-primary mb-2">Invoice Number *</label>
-                                <input
-                                    type="text"
-                                    name="invoiceNumber"
-                                    value={invoiceForm.invoiceNumber}
-                                    onChange={handleFormChange}
-                                    placeholder="INV-2026-001"
-                                    required
-                                    className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-primary mb-2">Invoice Date *</label>
-                                <input
-                                    type="date"
-                                    name="invoiceDate"
-                                    value={invoiceForm.invoiceDate}
-                                    onChange={handleFormChange}
-                                    required
-                                    className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary focus:outline-none focus:border-primary"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-primary mb-2">Supplier GSTIN</label>
-                                <input
-                                    type="text"
-                                    value={selectedBusiness.gstin}
-                                    disabled
-                                    className="w-full border border-primary/10 rounded-lg px-4 py-3 text-primary/60 bg-gray-50"
-                                />
-                            </div>
-                        </div>
-
-                        {/* Recipient Details */}
-                        <div className="bg-gray-50 rounded-xl p-6 mb-6">
-                            <h3 className="text-lg font-bold text-primary mb-4">Recipient Details</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-primary mb-2">GSTIN *</label>
-                                    <input
-                                        type="text"
-                                        name="recipientGstin"
-                                        value={invoiceForm.recipientGstin}
-                                        onChange={handleFormChange}
-                                        placeholder="33AABCU1234A1Z5"
-                                        maxLength={15}
-                                        required
-                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-primary mb-2">Legal Name</label>
-                                    <input
-                                        type="text"
-                                        name="recipientName"
-                                        value={invoiceForm.recipientName}
-                                        onChange={handleFormChange}
-                                        placeholder="Recipient Company Name"
-                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-primary mb-2">State</label>
-                                    <select
-                                        name="recipientState"
-                                        value={invoiceForm.recipientState}
-                                        onChange={handleFormChange}
-                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary focus:outline-none focus:border-primary"
-                                    >
-                                        {INDIAN_STATES.map(state => (
-                                            <option key={state.code} value={state.code}>
-                                                {state.code} - {state.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-primary mb-2">PIN Code</label>
-                                    <input
-                                        type="text"
-                                        name="recipientPin"
-                                        value={invoiceForm.recipientPin}
-                                        onChange={handleFormChange}
-                                        placeholder="600001"
-                                        maxLength={6}
-                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Transportation Details (Optional for IRN, Required for EWB) */}
-                        <div className="bg-gray-50 rounded-xl p-6 mb-6">
-                            <h3 className="text-lg font-bold text-primary mb-4">Transportation Details</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-primary mb-2">Vehicle Number</label>
-                                    <input
-                                        type="text"
-                                        name="vehicleNumber"
-                                        value={invoiceForm.vehicleNumber || ''}
-                                        onChange={handleFormChange}
-                                        placeholder="e.g. TN38AB1234"
-                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-primary mb-2">Approx Distance (km)</label>
-                                    <input
-                                        type="number"
-                                        name="transportDistance"
-                                        value={invoiceForm.transportDistance || ''}
-                                        onChange={handleFormChange}
-                                        placeholder="e.g. 150"
-                                        className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Items Table */}
-                        <div className="mb-6">
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-lg font-bold text-primary">Invoice Items</h3>
-                                <button
-                                    type="button"
-                                    onClick={addItemRow}
-                                    className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors text-sm"
+                            {/* React-PDF Viewer */}
+                            <div className="w-full bg-white rounded-lg shadow-lg overflow-hidden" style={{ minHeight: '800px', height: 'calc(100vh - 250px)' }}>
+                                <BlobProvider
+                                    document={
+                                        <InvoicePDF
+                                            data={{
+                                                supplierName: selectedBusiness.name,
+                                                supplierAddress: selectedBusiness.address,
+                                                supplierPhone: selectedBusiness.phone,
+                                                supplierGstin: selectedBusiness.gstin,
+                                                supplierState: selectedBusiness.stateCode,
+                                                invoiceNumber: invoiceForm.invoiceNumber,
+                                                invoiceDate: invoiceForm.invoiceDate,
+                                                eInvoiceNo: invoiceForm.eInvoiceNo,
+                                                recipientName: invoiceForm.recipientName,
+                                                recipientAddress: invoiceForm.recipientAddress,
+                                                recipientPhone: invoiceForm.recipientPhone,
+                                                recipientEmail: invoiceForm.recipientEmail,
+                                                recipientGstin: invoiceForm.recipientGstin,
+                                                recipientState: invoiceForm.recipientState,
+                                                recipientPin: invoiceForm.recipientPin,
+                                                recipientCountry: invoiceForm.recipientCountry,
+                                                placeOfSupply: invoiceForm.placeOfSupply,
+                                                // Reference details
+                                                deliveryNote: invoiceForm.deliveryNote,
+                                                modeOfPayment: invoiceForm.modeOfPayment,
+                                                supplierRef: invoiceForm.supplierRef,
+                                                otherReferences: invoiceForm.otherReferences,
+                                                buyerOrderNo: invoiceForm.buyerOrderNo,
+                                                buyerOrderDate: invoiceForm.buyerOrderDate,
+                                                dispatchDocNo: invoiceForm.dispatchDocNo,
+                                                deliveryNoteDate: invoiceForm.deliveryNoteDate,
+                                                despatchedThrough: invoiceForm.despatchedThrough,
+                                                destination: invoiceForm.destination,
+                                                termsOfDelivery: invoiceForm.termsOfDelivery,
+                                                items: invoiceForm.items,
+                                                totals: totals
+                                            }}
+                                            qrCode={null}
+                                            irn={null}
+                                            ackNo={null}
+                                        />
+                                    }
                                 >
-                                    <HiOutlinePlus className="text-lg" />
-                                    Add Item
-                                </button>
-                            </div>
-
-                            <div className="overflow-x-auto">
-                                <table className="w-full border-collapse">
-                                    <thead>
-                                        <tr className="bg-primary text-white text-sm">
-                                            <th className="p-3 text-left rounded-tl-lg">Product/Service</th>
-                                            <th className="p-3 text-left">HSN Code</th>
-                                            <th className="p-3 text-center w-24">Qty</th>
-                                            <th className="p-3 text-right w-32">Rate (₹)</th>
-                                            <th className="p-3 text-center w-24">GST %</th>
-                                            <th className="p-3 text-right w-32">Amount</th>
-                                            <th className="p-3 text-center w-16 rounded-tr-lg">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {invoiceForm.items.map((item, index) => (
-                                            <tr key={item.id} className="border-b border-gray-100">
-                                                <td className="p-3">
-                                                    <input
-                                                        type="text"
-                                                        value={item.product}
-                                                        onChange={(e) => handleItemChange(index, 'product', e.target.value)}
-                                                        placeholder="Pneumatic Valve"
-                                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary"
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <select
-                                                        value={item.hsn}
-                                                        onChange={(e) => handleItemChange(index, 'hsn', e.target.value)}
-                                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary"
-                                                    >
-                                                        {DEFAULT_HSN_CODES.map(hsn => (
-                                                            <option key={hsn.code} value={hsn.code}>
-                                                                {hsn.code} - {hsn.description}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </td>
-                                                <td className="p-3">
-                                                    <input
-                                                        type="number"
-                                                        value={item.qty}
-                                                        onChange={(e) => handleItemChange(index, 'qty', parseInt(e.target.value) || 0)}
-                                                        min="1"
-                                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-center focus:outline-none focus:border-primary"
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <input
-                                                        type="number"
-                                                        value={item.rate}
-                                                        onChange={(e) => handleItemChange(index, 'rate', parseFloat(e.target.value) || 0)}
-                                                        min="0"
-                                                        step="0.01"
-                                                        placeholder="0.00"
-                                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-right focus:outline-none focus:border-primary"
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <select
-                                                        value={item.gstPercent}
-                                                        onChange={(e) => handleItemChange(index, 'gstPercent', parseInt(e.target.value))}
-                                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-center focus:outline-none focus:border-primary"
-                                                    >
-                                                        <option value={0}>0%</option>
-                                                        <option value={5}>5%</option>
-                                                        <option value={12}>12%</option>
-                                                        <option value={18}>18%</option>
-                                                        <option value={28}>28%</option>
-                                                    </select>
-                                                </td>
-                                                <td className="p-3 text-right font-medium text-primary">
-                                                    {formatCurrency(item.qty * item.rate)}
-                                                </td>
-                                                <td className="p-3 text-center">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => removeItemRow(index)}
-                                                        disabled={invoiceForm.items.length === 1}
-                                                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
-                                                    >
-                                                        <HiOutlineTrash className="text-lg" />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                    {({ blob, url, loading, error }) => {
+                                        if (loading) {
+                                            return (
+                                                <div className="w-full h-full flex items-center justify-center">
+                                                    <div className="text-center">
+                                                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+                                                        <p className="text-gray-600">Generating PDF preview...</p>
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+                                        if (error) {
+                                            return (
+                                                <div className="w-full h-full flex items-center justify-center">
+                                                    <div className="text-center text-red-600">
+                                                        <p className="font-bold">Error generating PDF:</p>
+                                                        <p className="text-sm">{error.message}</p>
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+                                        if (url) {
+                                            return (
+                                                <iframe
+                                                    src={url}
+                                                    style={{
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        minHeight: '800px',
+                                                        border: 'none'
+                                                    }}
+                                                    title="Invoice PDF Preview"
+                                                />
+                                            );
+                                        }
+                                        return null;
+                                    }}
+                                </BlobProvider>
                             </div>
                         </div>
 
-                        {/* Totals */}
-                        <div className="flex justify-end mb-8">
-                            <div className="w-full md:w-80 bg-gray-50 rounded-xl p-4 space-y-3">
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-primary/70">Taxable Value:</span>
-                                    <span className="font-medium text-primary">{formatCurrency(totals.taxableValue)}</span>
-                                </div>
-                                {totals.isInterState ? (
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-primary/70">IGST:</span>
-                                        <span className="font-medium text-primary">{formatCurrency(totals.igst)}</span>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-primary/70">CGST:</span>
-                                            <span className="font-medium text-primary">{formatCurrency(totals.cgst)}</span>
-                                        </div>
-                                        <div className="flex justify-between text-sm">
-                                            <span className="text-primary/70">SGST:</span>
-                                            <span className="font-medium text-primary">{formatCurrency(totals.sgst)}</span>
-                                        </div>
-                                    </>
-                                )}
-                                <div className="border-t border-gray-200 pt-3 flex justify-between">
-                                    <span className="font-bold text-primary">Invoice Total:</span>
-                                    <span className="font-bold text-xl text-primary">{formatCurrency(totals.invoiceTotal)}</span>
-                                </div>
-                            </div>
+                        {/* RIGHT SIDE: EDITOR PANEL */}
+                        <div className="w-full lg:w-1/2 bg-[#06302C] overflow-y-auto relative scrollbar-thin scrollbar-thumb-emerald-700 scrollbar-track-emerald-900/20">
+                            {/* Empty State / Select Prompt if needed, or just default to showing editor */}
+                            <InvoiceEditorSimple
+                                invoiceForm={invoiceForm}
+                                handleFormChange={handleFormChange}
+                                handleItemChange={handleItemChange}
+                                addItemRow={addItemRow}
+                                removeItemRow={removeItemRow}
+                                states={INDIAN_STATES}
+                                hsnCodes={DEFAULT_HSN_CODES}
+                                totals={totals}
+                                generating={generating}
+                                handleGenerateIRN={handleGenerateIRN}
+                                selectedBusiness={selectedBusiness}
+                                missingFields={missingFields}
+                            />
                         </div>
-
-
-
-                        {/* Generate Button */}
-                        <div className="flex justify-end mb-6">
-                            <button
-                                type="submit"
-                                disabled={generating}
-                                className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-bold rounded-xl hover:from-emerald-600 hover:to-emerald-700 transition-all shadow-lg shadow-emerald-500/30 disabled:opacity-70 disabled:cursor-not-allowed"
-                            >
-                                {generating ? (
-                                    <>
-                                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                                        Generating IRN...
-                                    </>
-                                ) : (
-                                    <>
-                                        <HiOutlineQrcode className="text-xl" />
-                                        Generate IRN
-                                    </>
-                                )}
-                            </button>
-                        </div>
-
-                        {/* Live Invoice Preview */}
-                        <div className="mt-8 border-t border-gray-200 pt-8 animate-fade-in">
-                            <div className="bg-gray-100 p-4 rounded-xl overflow-x-auto shadow-inner">
-                                <div id="einvoice-preview" dangerouslySetInnerHTML={{ __html: getInvoiceTemplate(invoiceForm, 'preview') }} />
-                            </div>
-                        </div>
-                    </form>
+                    </div>
                 )}
 
                 {/* E-Way Bill Tab Content */}
                 {activeTab === 'eway' && (
-                    <div>
-                        <div className="mb-6">
-                            <h3 className="text-lg font-bold text-primary mb-2">Generate E-Way Bill</h3>
-                            <p className="text-sm text-primary/60">Select an invoice with IRN to generate E-Way Bill</p>
+                    <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] gap-6">
+                        {/* LEFT SIDE: PREVIEW PANEL */}
+                        <div className="w-full lg:w-1/2 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-300 flex flex-col overflow-hidden relative">
+                            <div className="absolute top-0 left-0 right-0 bg-white/90 backdrop-blur px-4 py-2 border-b border-gray-200 z-10 flex justify-between items-center">
+                                <span className="text-sm font-medium text-gray-600 flex items-center gap-2">
+                                    <HiOutlineDocumentText className="text-lg" />
+                                    E-Way Bill Preview
+                                </span>
+                                {selectedEwbInvoice && (
+                                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                                        {selectedEwbInvoice.invoice_number}
+                                    </span>
+                                )}
+                            </div>
+
+                            <div className="flex-1 overflow-hidden p-4 pt-12">
+                                {!selectedEwbInvoice ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                                        <HiOutlineTruck className="text-6xl mb-4 opacity-50" />
+                                        <p>Select an invoice to preview E-Way Bill</p>
+                                    </div>
+                                ) : (
+                                    <BlobProvider
+                                        document={
+                                            <EWayBillPDF
+                                                data={{
+                                                    // Base data from selected invoice
+                                                    ewbNumber: selectedEwbInvoice.ewb_no || generatedEwb?.ewbNo || 'Not Generated',
+                                                    generatedDate: selectedEwbInvoice.ewb_generated_at || new Date(),
+                                                    validUntil: selectedEwbInvoice.ewb_valid_upto || new Date(new Date().setDate(new Date().getDate() + 1)),
+                                                    irn: selectedEwbInvoice.irn,
+
+                                                    // Parties
+                                                    supplierName: selectedEwbInvoice.supplier_name,
+                                                    supplierAddress: selectedEwbInvoice.supplier_address || (selectedEwbInvoice.signed_invoice ? JSON.parse(selectedEwbInvoice.signed_invoice).SellerDtls?.Addr1 : ''),
+                                                    supplierGstin: selectedEwbInvoice.supplier_gstin,
+
+                                                    recipientName: selectedEwbInvoice.recipient_name,
+                                                    recipientAddress: selectedEwbInvoice.recipient_address || (selectedEwbInvoice.signed_invoice ? JSON.parse(selectedEwbInvoice.signed_invoice).BuyerDtls?.Addr1 : ''),
+                                                    recipientGstin: selectedEwbInvoice.recipient_gstin,
+
+                                                    dispatchFrom: selectedEwbInvoice.signed_invoice ? JSON.parse(selectedEwbInvoice.signed_invoice).DispDtls?.Addr1 : '',
+                                                    destination: selectedEwbInvoice.signed_invoice ? JSON.parse(selectedEwbInvoice.signed_invoice).ShipDtls?.Addr1 : '',
+
+                                                    // Goods (use first item as summary or map safely)
+                                                    productDescription: selectedEwbInvoice.items?.[0]?.product || 'Multi-Product',
+                                                    hsnCode: selectedEwbInvoice.items?.[0]?.hsn || 'Multi',
+                                                    quantity: selectedEwbInvoice.items?.reduce((acc, item) => acc + (parseInt(item.qty) || 0), 0) || 0,
+                                                    taxableValue: selectedEwbInvoice.total_amount, // Approximation
+                                                    invoiceValue: selectedEwbInvoice.total_amount,
+                                                    invoiceNumber: selectedEwbInvoice.invoice_number,
+                                                    invoiceDate: selectedEwbInvoice.invoice_date,
+
+                                                    // Transport (Live update from form)
+                                                    transporterId: ewbForm.transId,
+                                                    transporterName: ewbForm.transName,
+                                                    vehicleNumber: ewbForm.vehicleNo,
+                                                    distance: ewbForm.distance,
+                                                    transportMode: 'Road'
+                                                }}
+                                                qrCode={selectedEwbInvoice.qrcode || null}
+                                            />
+                                        }
+                                    >
+                                        {({ url, loading, error }) => {
+                                            if (loading) return (
+                                                <div className="h-full flex items-center justify-center">
+                                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                                                </div>
+                                            );
+                                            if (error) return (
+                                                <div className="h-full flex items-center justify-center text-red-500">
+                                                    Error loading preview
+                                                </div>
+                                            );
+                                            return (
+                                                <iframe
+                                                    src={url}
+                                                    className="w-full h-full rounded shadow-sm border border-gray-200"
+                                                    title="E-Way Bill Preview"
+                                                />
+                                            );
+                                        }}
+                                    </BlobProvider>
+                                )}
+                            </div>
                         </div>
 
-                        {/* Invoice Selection */}
-                        <div className="bg-gray-50 rounded-xl p-6 mb-6">
-                            <h4 className="text-sm font-medium text-primary mb-4">Select Invoice</h4>
-                            {ewbLoading ? (
-                                <div className="flex items-center justify-center py-8">
-                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                                    <span className="ml-2 text-primary/60">Loading invoices...</span>
-                                </div>
-                            ) : ewbInvoices.length === 0 ? (
-                                <div className="text-center py-8 text-primary/60">
-                                    <HiOutlineDocumentText className="text-4xl mx-auto mb-2" />
-                                    <p>No invoices with IRN available for E-Way Bill generation.</p>
-                                    <p className="text-sm mt-1">Generate an IRN first from Sales/Purchase tab.</p>
-                                </div>
-                            ) : (
-                                <div className="space-y-3 max-h-64 overflow-y-auto">
-                                    {ewbInvoices.map(inv => (
-                                        <div
-                                            key={inv.id}
-                                            onClick={() => {
-                                                setSelectedEwbInvoice(inv);
-                                                // Try to load cached transportation details
-                                                try {
-                                                    const cachedMeta = JSON.parse(localStorage.getItem(`ewb_meta_${inv.invoice_number}`) || '{}');
-                                                    if (cachedMeta.vehicleNo || cachedMeta.distance) {
-                                                        setEwbForm(prev => ({
-                                                            ...prev,
-                                                            distance: cachedMeta.distance || '',
-                                                            vehicleNo: cachedMeta.vehicleNo || ''
-                                                        }));
-                                                    }
-                                                } catch (e) { console.error('Error loading config', e); }
-                                            }}
-                                            className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedEwbInvoice?.id === inv.id
-                                                ? 'border-primary bg-primary/5'
-                                                : 'border-gray-200 hover:border-primary/50'
-                                                }`}
-                                        >
-                                            <div className="flex justify-between items-start">
+                        {/* RIGHT SIDE: FORM PANEL */}
+                        <div className="w-full lg:w-1/2 overflow-y-auto">
+                            <div className="bg-[#0f2926] rounded-2xl shadow-sm border border-primary/10 p-6 h-full text-white">
+                                <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                                    <HiOutlineTruck className="text-2xl" />
+                                    Generate E-Way Bill
+                                </h2>
+
+                                {!selectedEwbInvoice ? (
+                                    <div className="text-center py-12 bg-[#0a1f1c] rounded-xl border-2 border-dashed border-[#2c7a7b]/30">
+                                        <HiOutlineDocumentText className="text-4xl text-[#2c7a7b] mx-auto mb-3" />
+                                        <p className="text-gray-500 font-medium">No invoice selected</p>
+                                        <p className="text-sm text-gray-400 mt-1">Select an invoice from the list below to proceed</p>
+                                    </div>
+                                ) : (
+                                    <form onSubmit={handleGenerateEwb} className="space-y-6">
+                                        <div className="bg-[#e6f4f1] border border-blue-100 rounded-xl p-4">
+                                            <div className="grid grid-cols-2 gap-4 text-sm">
                                                 <div>
-                                                    <p className="font-medium text-primary">{inv.invoice_number}</p>
-                                                    <p className="text-sm text-primary/60">{inv.recipient_name || inv.recipient_gstin}</p>
+                                                    <span className="text-[#2c7a7b] block text-xs uppercase tracking-wider font-semibold">Invoice No</span>
+                                                    <span className="font-bold text-[#0f2926]">{selectedEwbInvoice.invoice_number}</span>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className="font-medium text-primary">{formatCurrency(inv.total_amount)}</p>
-                                                    {inv.ewb_no ? (
-                                                        <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">EWB: {inv.ewb_no}</span>
-                                                    ) : (
-                                                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Pending EWB</span>
-                                                    )}
+                                                <div>
+                                                    <span className="text-[#2c7a7b] block text-xs uppercase tracking-wider font-semibold">Date</span>
+                                                    <span className="font-bold text-[#0f2926]">{formatDate(selectedEwbInvoice.invoice_date)}</span>
+                                                </div>
+                                                <div className="col-span-2">
+                                                    <span className="text-[#2c7a7b] block text-xs uppercase tracking-wider font-semibold">Recipient</span>
+                                                    <span className="font-bold text-[#0f2926]">{selectedEwbInvoice.recipient_name}</span>
                                                 </div>
                                             </div>
-                                            <p className="text-xs text-primary/40 mt-2 font-mono truncate">IRN: {inv.irn}</p>
                                         </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
 
-                        {/* E-Way Bill Form */}
-                        {selectedEwbInvoice && !selectedEwbInvoice.ewb_no && (
-                            <form onSubmit={handleGenerateEwb} className="bg-blue-50 rounded-xl p-6">
-                                <h4 className="text-sm font-medium text-primary mb-4">E-Way Bill Details</h4>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="col-span-2">
+                                                <label className="block text-sm font-medium text-gray-300 mb-1">Distance (km) *</label>
+                                                <input
+                                                    type="number"
+                                                    name="distance"
+                                                    value={ewbForm.distance}
+                                                    onChange={handleEwbFormChange}
+                                                    className="w-full bg-transparent rounded-lg border border-[#2c7a7b] text-white placeholder-gray-500 px-4 py-3 focus:outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-400 transition-colors"
+                                                    placeholder="Example: 150"
+                                                    required
+                                                />
+                                            </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                                    <div>
-                                        <label className="block text-sm font-medium text-primary mb-2">Distance (km) *</label>
-                                        <input
-                                            type="number"
-                                            name="distance"
-                                            value={ewbForm.distance}
-                                            onChange={handleEwbFormChange}
-                                            placeholder="e.g., 250"
-                                            min="1"
-                                            required
-                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-primary mb-2">Vehicle Number</label>
-                                        <input
-                                            type="text"
-                                            name="vehicleNo"
-                                            value={ewbForm.vehicleNo}
-                                            onChange={handleEwbFormChange}
-                                            placeholder="e.g., TN38AB1234"
-                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-primary mb-2">Transporter Name</label>
-                                        <input
-                                            type="text"
-                                            name="transName"
-                                            value={ewbForm.transName}
-                                            onChange={handleEwbFormChange}
-                                            placeholder="e.g., ABC Logistics"
-                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-primary mb-2">Transporter GSTIN</label>
-                                        <input
-                                            type="text"
-                                            name="transGstin"
-                                            value={ewbForm.transGstin}
-                                            onChange={handleEwbFormChange}
-                                            placeholder="e.g., 33AAABC1234C1ZB"
-                                            maxLength={15}
-                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary uppercase"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-primary mb-2">Transporter ID</label>
-                                        <input
-                                            type="text"
-                                            name="transId"
-                                            value={ewbForm.transId}
-                                            onChange={handleEwbFormChange}
-                                            placeholder="e.g., TRN123"
-                                            className="w-full border border-primary/20 rounded-lg px-4 py-3 text-primary placeholder-primary/40 focus:outline-none focus:border-primary"
-                                        />
-                                    </div>
-                                </div>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-1">Vehicle No</label>
+                                                <input
+                                                    type="text"
+                                                    name="vehicleNo"
+                                                    value={ewbForm.vehicleNo}
+                                                    onChange={handleEwbFormChange}
+                                                    className="w-full bg-transparent rounded-lg border border-[#2c7a7b] text-white placeholder-gray-500 px-4 py-3 focus:outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-400 transition-colors uppercase"
+                                                    placeholder="TN01AB1234"
+                                                />
+                                            </div>
 
-                                <div className="flex justify-end">
-                                    <button
-                                        type="submit"
-                                        disabled={generatingEwb}
-                                        className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-blue-500 to-blue-600 text-white font-bold rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all shadow-lg shadow-blue-500/30 disabled:opacity-70 disabled:cursor-not-allowed"
-                                    >
-                                        {generatingEwb ? (
-                                            <>
-                                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                                                Generating EWB...
-                                            </>
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-300 mb-1">Transporter ID</label>
+                                                <input
+                                                    type="text"
+                                                    name="transId"
+                                                    value={ewbForm.transId}
+                                                    onChange={handleEwbFormChange}
+                                                    className="w-full bg-transparent rounded-lg border border-[#2c7a7b] text-white placeholder-gray-500 px-4 py-3 focus:outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-400 transition-colors"
+                                                    placeholder="Transporter ID"
+                                                />
+                                            </div>
+
+                                            <div className="col-span-2">
+                                                <label className="block text-sm font-medium text-gray-300 mb-1">Transporter Name</label>
+                                                <input
+                                                    type="text"
+                                                    name="transName"
+                                                    value={ewbForm.transName}
+                                                    onChange={handleEwbFormChange}
+                                                    className="w-full bg-transparent rounded-lg border border-[#2c7a7b] text-white placeholder-gray-500 px-4 py-3 focus:outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-400 transition-colors"
+                                                    placeholder="Transporter Name"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="pt-4">
+                                            <button
+                                                type="submit"
+                                                disabled={generatingEwb}
+                                                className="w-full bg-[#1b9c85] hover:bg-[#168a75] text-white py-3 px-4 rounded-xl transition-colors shadow-lg font-bold flex items-center justify-center gap-2"
+                                            >
+                                                {generatingEwb ? (
+                                                    <>
+                                                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                                                        Generating...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <HiOutlineTruck className="text-xl" />
+                                                        Generate E-Way Bill
+                                                    </>
+                                                )}
+                                            </button>
+                                        </div>
+                                    </form>
+                                )}
+
+                                {/* Available Invoices List */}
+                                <div className="mt-8">
+                                    <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">
+                                        Select Invoice for E-Way Bill
+                                    </h3>
+                                    <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+                                        {ewbInvoices.length === 0 ? (
+                                            <p className="text-sm text-gray-400 italic">No pending invoices found.</p>
                                         ) : (
-                                            <>
-                                                <HiOutlineTruck className="text-xl" />
-                                                Generate E-Way Bill
-                                            </>
+                                            ewbInvoices.map(invoice => (
+                                                <div
+                                                    key={invoice.id}
+                                                    onClick={() => setSelectedEwbInvoice(invoice)}
+                                                    className={`p-3 rounded-lg border cursor-pointer transition-all ${selectedEwbInvoice?.id === invoice.id
+                                                        ? 'bg-teal-50 border-teal-500 ring-1 ring-teal-500'
+                                                        : 'bg-gray-50 border-gray-200 hover:border-teal-300'
+                                                        }`}
+                                                >
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="font-bold text-gray-800">{invoice.invoice_number}</span>
+                                                        <span className="text-xs text-gray-500">{formatDate(invoice.invoice_date)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center text-sm">
+                                                        <span className="text-gray-600 truncate max-w-[150px]">{invoice.recipient_name}</span>
+                                                        <span className="font-medium text-teal-700">{formatCurrency(invoice.total_amount)}</span>
+                                                    </div>
+                                                </div>
+                                            ))
                                         )}
-                                    </button>
+                                    </div>
                                 </div>
-                            </form>
-                        )}
-
-                        {/* Selected invoice already has EWB */}
-                        {selectedEwbInvoice && selectedEwbInvoice.ewb_no && (
-                            <div className="bg-emerald-50 rounded-xl p-6 text-center">
-                                <HiOutlineCheckCircle className="text-4xl text-emerald-600 mx-auto mb-2" />
-                                <p className="text-emerald-700 font-medium">E-Way Bill already generated for this invoice</p>
-                                <p className="text-emerald-600 font-mono mt-2">EWB No: {selectedEwbInvoice.ewb_no}</p>
                             </div>
-                        )}
+                        </div>
                     </div>
                 )}
 
@@ -1618,18 +1909,30 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                                 <td className="p-3 text-center">
                                                     <div className="flex items-center justify-center gap-2">
                                                         <button
+                                                            onClick={() => viewQRCode(record)}
                                                             className="p-2 text-primary hover:bg-primary/10 rounded-lg transition-colors"
                                                             title="View QR Code"
                                                         >
                                                             <HiOutlineQrcode className="text-lg" />
                                                         </button>
                                                         <button
+                                                            onClick={() => downloadInvoicePDF(record)}
                                                             className="p-2 text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                                                            title="Print"
+                                                            title="Download Invoice PDF"
                                                         >
                                                             <HiOutlinePrinter className="text-lg" />
                                                         </button>
+                                                        {record.ewb_no && (
+                                                            <button
+                                                                onClick={() => downloadHistoryEwbPDF(record)}
+                                                                className="p-2 text-teal-600 hover:bg-teal-50 rounded-lg transition-colors"
+                                                                title="Download E-Way Bill PDF"
+                                                            >
+                                                                <HiOutlineTruck className="text-lg" />
+                                                            </button>
+                                                        )}
                                                         <button
+                                                            onClick={() => downloadJSON(record)}
                                                             className="p-2 text-primary hover:bg-primary/10 rounded-lg transition-colors"
                                                             title="Download JSON"
                                                         >
@@ -1697,401 +2000,59 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                 {/* Action Buttons - Compact Row */}
                                 <div className="grid grid-cols-4 gap-2 pt-3">
                                     <button
-                                        onClick={() => {
-                                            // Get invoice data
+                                        onClick={async () => {
+                                            // Print E-Invoice using React-PDF
                                             const inv = generatedIRN.invoiceData || {};
-                                            const items = inv.items || [];
-                                            const totals = inv.totals || {};
 
-                                            // Format currency
-                                            const formatINR = (amt) => new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amt || 0);
+                                            // Create PDF blob
+                                            const blob = await pdf(
+                                                <InvoicePDF
+                                                    data={inv}
+                                                    qrCode={generatedIRN.qrcode || generatedIRN.signedQrCode}
+                                                    irn={generatedIRN.irn}
+                                                    ackNo={generatedIRN.ackNo}
+                                                />
+                                            ).toBlob();
 
-                                            // Format date
-                                            const formatDt = (d) => {
-                                                const date = new Date(d);
-                                                return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }).replace(/ /g, '-');
-                                            };
-
-                                            // Number to words helper - with safeguards against infinite recursion
-                                            const numberToWords = (num) => {
-                                                // Safeguards
-                                                if (num === null || num === undefined || isNaN(num)) return 'Zero';
-                                                num = Math.floor(Math.abs(num)); // Handle negatives and decimals
-                                                if (num > 999999999999) return 'Amount Too Large'; // Limit to prevent stack overflow
-
-                                                const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
-                                                    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-                                                const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-
-                                                if (num === 0) return 'Zero';
-                                                if (num < 20) return ones[num] || 'Zero';
-                                                if (num < 100) return tens[Math.floor(num / 10)] + (num % 10 ? ' ' + ones[num % 10] : '');
-                                                if (num < 1000) return ones[Math.floor(num / 100)] + ' Hundred' + (num % 100 ? ' ' + numberToWords(num % 100) : '');
-                                                if (num < 100000) return numberToWords(Math.floor(num / 1000)) + ' Thousand' + (num % 1000 ? ' ' + numberToWords(num % 1000) : '');
-                                                if (num < 10000000) return numberToWords(Math.floor(num / 100000)) + ' Lakh' + (num % 100000 ? ' ' + numberToWords(num % 100000) : '');
-                                                return numberToWords(Math.floor(num / 10000000)) + ' Crore' + (num % 10000000 ? ' ' + numberToWords(num % 10000000) : '');
-                                            };
-
-                                            const amountInWords = (amt) => {
-                                                if (amt === null || amt === undefined || isNaN(amt)) return 'Indian Rupee Zero Only';
-                                                amt = Math.abs(amt || 0);
-                                                const rupees = Math.floor(amt);
-                                                const paise = Math.round((amt - rupees) * 100);
-                                                let result = 'Indian Rupee ' + numberToWords(rupees);
-                                                if (paise > 0) result += ' and ' + numberToWords(paise) + ' Paise';
-                                                result += ' Only';
-                                                return result;
-                                            };
-
-                                            // Get state info
-                                            const getStateInfo = (code) => {
-                                                const states = { '27': 'Maharashtra', '33': 'Tamil Nadu', '29': 'Karnataka', '07': 'Delhi', '24': 'Gujarat' };
-                                                return { name: states[code] || 'State', code: code };
-                                            };
-
-                                            const supplierState = getStateInfo(inv.supplierState || '33');
-                                            const buyerState = getStateInfo(inv.recipientState || '29');
-
-                                            // HSN tax breakdown
-                                            const hsnBreakdown = {};
-                                            items.forEach(item => {
-                                                const taxable = item.qty * item.rate;
-                                                const rate = item.gstPercent / 2; // CGST/SGST rate
-                                                const taxAmt = taxable * (item.gstPercent / 100) / 2;
-                                                if (!hsnBreakdown[item.hsn]) {
-                                                    hsnBreakdown[item.hsn] = { taxable: 0, rate: rate, cgst: 0, sgst: 0 };
-                                                }
-                                                hsnBreakdown[item.hsn].taxable += taxable;
-                                                hsnBreakdown[item.hsn].cgst += taxAmt;
-                                                hsnBreakdown[item.hsn].sgst += taxAmt;
-                                            });
-
-                                            // Build items rows
-                                            let totalQty = 0;
-                                            const itemsHtml = items.map((item, idx) => {
-                                                const lineTotal = item.qty * item.rate;
-                                                totalQty += item.qty;
-                                                return `
-                                                <tr>
-                                                    <td style="border: 1px solid #000; padding: 6px; text-align: center;">${idx + 1}</td>
-                                                    <td style="border: 1px solid #000; padding: 6px;">${item.product}</td>
-                                                    <td style="border: 1px solid #000; padding: 6px; text-align: center;">${item.hsn}</td>
-                                                    <td style="border: 1px solid #000; padding: 6px; text-align: center;">${item.qty} No</td>
-                                                    <td style="border: 1px solid #000; padding: 6px; text-align: right;">${formatINR(item.rate)}</td>
-                                                    <td style="border: 1px solid #000; padding: 6px; text-align: center;">No</td>
-                                                    <td style="border: 1px solid #000; padding: 6px; text-align: center;"></td>
-                                                    <td style="border: 1px solid #000; padding: 6px; text-align: right;">${formatINR(lineTotal)}</td>
-                                                </tr>
-                                            `;
-                                            }).join('');
-
-                                            // CGST/SGST rows
-                                            const cgstHtml = `
-                                            <tr>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px; text-align: right; font-style: italic;">CGST</td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px; text-align: right;">${formatINR(totals.cgst || 0)}</td>
-                                            </tr>
-                                            <tr>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px; text-align: right; font-style: italic;">SGST</td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                <td style="border: 1px solid #000; padding: 6px; text-align: right;">${formatINR(totals.sgst || 0)}</td>
-                                            </tr>
-                                        `;
-
-                                            // HSN breakdown table
-                                            const hsnRows = Object.entries(hsnBreakdown).map(([hsn, data]) => `
-                                            <tr>
-                                                <td style="border: 1px solid #000; padding: 4px;">${hsn}</td>
-                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(data.taxable)}</td>
-                                                <td style="border: 1px solid #000; padding: 4px; text-align: center;">${data.rate}%</td>
-                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(data.cgst)}</td>
-                                                <td style="border: 1px solid #000; padding: 4px; text-align: center;">${data.rate}%</td>
-                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(data.sgst)}</td>
-                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(data.cgst + data.sgst)}</td>
-                                            </tr>
-                                        `).join('');
-
-                                            const totalTax = (totals.cgst || 0) + (totals.sgst || 0);
-
-                                            // Print layout - Tax Invoice format
-                                            const printWindow = window.open('', '_blank');
-                                            printWindow.document.write(`
-                                            <!DOCTYPE html>
-                                            <html>
-                                            <head>
-                                                <title>Tax Invoice - ${inv.invoiceNumber || 'Invoice'}</title>
-                                                <style>
-                                                    @page { size: A4 portrait; margin: 10mm; }
-                                                    * { box-sizing: border-box; margin: 0; padding: 0; }
-                                                    body { font-family: Arial, sans-serif; font-size: 10pt; color: #000; line-height: 1.3; }
-                                                    .invoice-container { max-width: 210mm; margin: 0 auto; padding: 10px; }
-                                                    table { border-collapse: collapse; width: 100%; }
-                                                    @media print {
-                                                        body { -webkit-print-color-adjust: exact !important; }
-                                                    }
-                                                </style>
-                                            </head>
-                                            <body>
-                                                <div class="invoice-container">
-                                                    <!-- Header with Title and QR -->
-                                                    <table style="margin-bottom: 10px;">
-                                                        <tr>
-                                                            <td style="width: 70%; text-align: center; font-size: 18pt; font-weight: bold;">Tax Invoice</td>
-                                                            <td style="width: 30%; text-align: right;">
-                                                                <div style="display: inline-block; text-align: center;">
-                                                                    <div style="font-size: 9pt; font-weight: bold; margin-bottom: 5px;">e-Invoice</div>
-                                                                    ${generatedIRN.qrcode ? `<img src="${generatedIRN.qrcode}" style="width: 80px; height: 80px; border: 1px solid #000;" />` : '<div style="width: 80px; height: 80px; border: 1px solid #000; display: inline-block;"></div>'}
-                                                                </div>
-                                                            </td>
-                                                        </tr>
-                                                    </table>
-
-                                                    <!-- IRN Details -->
-                                                    <table style="margin-bottom: 10px; font-size: 9pt;">
-                                                        <tr>
-                                                            <td style="width: 60px;"><strong>IRN</strong></td>
-                                                            <td>: <span style="font-family: monospace; word-break: break-all;">${generatedIRN.irn}</span></td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td><strong>Ack No.</strong></td>
-                                                            <td>: ${generatedIRN.ackNo || '1120100365633X'}</td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td><strong>Ack Date</strong></td>
-                                                            <td>: ${formatDt(inv.invoiceDate)}</td>
-                                                        </tr>
-                                                    </table>
-
-                                                    <!-- Main Details Table -->
-                                                    <table style="border: 1px solid #000; margin-bottom: 10px;">
-                                                        <!-- Seller & Invoice Details Row -->
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; width: 50%; padding: 8px; vertical-align: top;" rowspan="5">
-                                                                <strong>${inv.supplierName || 'Breeze Techniques'}</strong><br/>
-                                                                HSR Layout<br/>
-                                                                Bangalore<br/>
-                                                                GSTIN/UIN: ${inv.supplierGstin || '33AAKCS0734Q1ZA'}<br/>
-                                                                State Name : ${supplierState.name}, Code : ${supplierState.code}
-                                                            </td>
-                                                            <td style="border: 1px solid #000; padding: 4px; width: 25%;">Invoice No.</td>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Dated</td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 4px; font-weight: bold;">${inv.invoiceNumber || 'SHB/456/20'}</td>
-                                                            <td style="border: 1px solid #000; padding: 4px; font-weight: bold;">${formatDt(inv.invoiceDate)}</td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Delivery Note</td>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Mode/Terms of Payment</td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Reference No. & Date.</td>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Other References</td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Buyer's Order No.</td>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Dated</td>
-                                                        </tr>
-
-                                                        <!-- Consignee Row -->
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 4px; background: #f5f5f5;" colspan="1">Consignee (Ship to)</td>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Dispatch Doc No.</td>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Delivery Note Date</td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 8px; vertical-align: top;" rowspan="3">
-                                                                <strong>${inv.recipientName || 'Customer'}</strong><br/>
-                                                                12th Cross<br/>
-                                                                GSTIN/UIN&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: ${inv.recipientGstin || 'N/A'}<br/>
-                                                                State Name&nbsp;&nbsp;&nbsp;: ${buyerState.name}, Code : ${buyerState.code}
-                                                            </td>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Dispatched through</td>
-                                                            <td style="border: 1px solid #000; padding: 4px;">Destination</td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 4px;" colspan="2">Terms of Delivery</td>
-                                                        </tr>
-
-                                                        <!-- Buyer Row -->
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 4px; background: #f5f5f5;" colspan="2">Buyer (Bill to)</td>
-                                                        </tr>
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 8px; vertical-align: top;" colspan="3">
-                                                                <strong>${inv.recipientName || 'Customer'}</strong><br/>
-                                                                12th Cross<br/>
-                                                                GSTIN/UIN&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: ${inv.recipientGstin || 'N/A'}<br/>
-                                                                State Name&nbsp;&nbsp;&nbsp;: ${buyerState.name}, Code : ${buyerState.code}
-                                                            </td>
-                                                        </tr>
-                                                    </table>
-
-                                                    <!-- Items Table -->
-                                                    <table style="border: 1px solid #000; margin-bottom: 5px;">
-                                                        <thead>
-                                                            <tr style="background: #f5f5f5;">
-                                                                <th style="border: 1px solid #000; padding: 6px; width: 30px;">Sl No.</th>
-                                                                <th style="border: 1px solid #000; padding: 6px;">Description of Goods</th>
-                                                                <th style="border: 1px solid #000; padding: 6px; width: 60px;">HSN/SAC</th>
-                                                                <th style="border: 1px solid #000; padding: 6px; width: 60px;">Quantity</th>
-                                                                <th style="border: 1px solid #000; padding: 6px; width: 70px;">Rate</th>
-                                                                <th style="border: 1px solid #000; padding: 6px; width: 30px;">per</th>
-                                                                <th style="border: 1px solid #000; padding: 6px; width: 50px;">Disc. %</th>
-                                                                <th style="border: 1px solid #000; padding: 6px; width: 80px;">Amount</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            ${itemsHtml}
-                                                            ${cgstHtml}
-                                                            <tr style="font-weight: bold;">
-                                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                                <td style="border: 1px solid #000; padding: 6px; text-align: right;">Total</td>
-                                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                                <td style="border: 1px solid #000; padding: 6px; text-align: center;">${totalQty} No</td>
-                                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                                <td style="border: 1px solid #000; padding: 6px;"></td>
-                                                                <td style="border: 1px solid #000; padding: 6px; text-align: right; font-size: 11pt;">₹ ${formatINR(totals.invoiceTotal)}</td>
-                                                            </tr>
-                                                        </tbody>
-                                                    </table>
-
-                                                    <!-- Amount in Words -->
-                                                    <table style="border: 1px solid #000; margin-bottom: 10px;">
-                                                        <tr>
-                                                            <td style="padding: 6px;">
-                                                                <span style="font-size: 8pt; color: #666;">Amount Chargeable (in words)</span><br/>
-                                                                <strong>${amountInWords(totals.invoiceTotal)}</strong>
-                                                                <span style="float: right; font-size: 8pt;">E. & O.E</span>
-                                                            </td>
-                                                        </tr>
-                                                    </table>
-
-                                                    <!-- HSN/SAC Tax Table -->
-                                                    <table style="border: 1px solid #000; margin-bottom: 5px; font-size: 9pt;">
-                                                        <thead>
-                                                            <tr style="background: #f5f5f5;">
-                                                                <th style="border: 1px solid #000; padding: 4px;" rowspan="2">HSN/SAC</th>
-                                                                <th style="border: 1px solid #000; padding: 4px;" rowspan="2">Taxable Value</th>
-                                                                <th style="border: 1px solid #000; padding: 4px;" colspan="2">Central Tax</th>
-                                                                <th style="border: 1px solid #000; padding: 4px;" colspan="2">State Tax</th>
-                                                                <th style="border: 1px solid #000; padding: 4px;" rowspan="2">Total Tax Amount</th>
-                                                            </tr>
-                                                            <tr style="background: #f5f5f5;">
-                                                                <th style="border: 1px solid #000; padding: 4px;">Rate</th>
-                                                                <th style="border: 1px solid #000; padding: 4px;">Amount</th>
-                                                                <th style="border: 1px solid #000; padding: 4px;">Rate</th>
-                                                                <th style="border: 1px solid #000; padding: 4px;">Amount</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            ${hsnRows}
-                                                            <tr style="font-weight: bold;">
-                                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">Total</td>
-                                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(totals.taxableValue)}</td>
-                                                                <td style="border: 1px solid #000; padding: 4px;"></td>
-                                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(totals.cgst)}</td>
-                                                                <td style="border: 1px solid #000; padding: 4px;"></td>
-                                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(totals.sgst)}</td>
-                                                                <td style="border: 1px solid #000; padding: 4px; text-align: right;">${formatINR(totalTax)}</td>
-                                                            </tr>
-                                                        </tbody>
-                                                    </table>
-
-                                                    <!-- Tax Amount in Words -->
-                                                    <p style="font-size: 9pt; margin-bottom: 10px;">
-                                                        <strong>Tax Amount (in words) :</strong> ${amountInWords(totalTax)}
-                                                    </p>
-
-                                                    <!-- Declaration & Signature -->
-                                                    <table style="border: 1px solid #000;">
-                                                        <tr>
-                                                            <td style="border: 1px solid #000; padding: 8px; width: 60%; vertical-align: top; font-size: 9pt;">
-                                                                <strong>Declaration</strong><br/>
-                                                                We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.
-                                                            </td>
-                                                            <td style="border: 1px solid #000; padding: 8px; text-align: right; vertical-align: top;">
-                                                                <strong>for ${inv.supplierName || 'Breeze Techniques'}</strong><br/><br/><br/><br/>
-                                                                <span style="font-size: 9pt;">Authorised Signatory</span>
-                                                            </td>
-                                                        </tr>
-                                                    </table>
-
-                                                    <!-- Footer -->
-                                                    <p style="text-align: center; margin-top: 15px; font-size: 9pt; color: #666;">
-                                                        This is a Computer Generated Invoice
-                                                    </p>
-                                                </div>
-                                            </body>
-                                            </html>
-                                        `);
-                                            printWindow.document.close();
-                                            printWindow.focus();
-                                            setTimeout(() => printWindow.print(), 300);
+                                            // Open blob in new tab for printing
+                                            const url = URL.createObjectURL(blob);
+                                            const printWindow = window.open(url, '_blank');
+                                            if (printWindow) {
+                                                printWindow.onload = () => {
+                                                    printWindow.print();
+                                                    // Clean up after print dialog closes
+                                                    setTimeout(() => URL.revokeObjectURL(url), 100);
+                                                };
+                                            }
                                         }}
                                         className="flex items-center justify-center gap-1 px-3 py-2 border-2 border-primary text-primary rounded-lg hover:bg-primary/5 transition-colors font-medium text-sm">
                                         <HiOutlinePrinter className="text-base" />
                                         Print
                                     </button>
                                     <button
-                                        onClick={() => {
-                                            // Download E-Invoice as PDF
+                                        onClick={async () => {
+                                            // Download E-Invoice using React-PDF
                                             const inv = generatedIRN.invoiceData || {};
-                                            const formatINR = (val) => parseFloat(val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                                            const totalTax = parseFloat(totals.cgst || 0) + parseFloat(totals.sgst || 0) + parseFloat(totals.igst || 0);
 
-                                            // Ensure items array exists
-                                            const invoiceData = {
-                                                ...generatedIRN.invoiceData,
-                                                irn: generatedIRN.irn,
-                                                ackNo: generatedIRN.ackNo,
-                                                ackDate: generatedIRN.ackDate,
-                                                qrcode: generatedIRN.signedQrCode || generatedIRN.qrcode,
-                                                // Fallback to form items if generated data is missing items
-                                                items: (generatedIRN.invoiceData && generatedIRN.invoiceData.items) ? generatedIRN.invoiceData.items : invoiceForm.items
-                                            };
+                                            // Create PDF blob
+                                            const blob = await pdf(
+                                                <InvoicePDF
+                                                    data={inv}
+                                                    qrCode={generatedIRN.qrcode || generatedIRN.signedQrCode}
+                                                    irn={generatedIRN.irn}
+                                                    ackNo={generatedIRN.ackNo}
+                                                />
+                                            ).toBlob();
 
-                                            const pdfElement = document.createElement('div');
-                                            pdfElement.innerHTML = getInvoiceTemplate(invoiceData, 'final');
-
-                                            // Position off-screen but keeping it visible for html2canvas
-                                            pdfElement.style.position = 'absolute';
-                                            pdfElement.style.top = '-10000px';
-                                            pdfElement.style.left = '-10000px';
-                                            pdfElement.style.width = '794px'; // A4 width at 96dpi approx
-                                            pdfElement.style.background = 'white';
-
-                                            document.body.appendChild(pdfElement);
-
-                                            // Wait for images to load
-                                            setTimeout(() => {
-                                                const opt = {
-                                                    margin: 0,
-                                                    filename: `E-Invoice_${invoiceForm.invoiceNumber}.pdf`,
-                                                    image: { type: 'jpeg', quality: 0.98 },
-                                                    html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false },
-                                                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-                                                };
-
-                                                html2pdf().set(opt).from(pdfElement).save().then(() => {
-                                                    document.body.removeChild(pdfElement);
-                                                }).catch(err => {
-                                                    console.error('PDF Generation Error:', err);
-                                                    document.body.removeChild(pdfElement);
-                                                });
-                                            }, 500);
+                                            // Download the blob
+                                            const url = URL.createObjectURL(blob);
+                                            const link = document.createElement('a');
+                                            link.href = url;
+                                            link.download = `E-Invoice_${inv.invoiceNumber || 'invoice'}.pdf`;
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            document.body.removeChild(link);
+                                            URL.revokeObjectURL(url);
                                         }}
                                         className="flex items-center justify-center gap-1 px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium text-sm">
                                         <HiOutlineDownload className="text-base" />
@@ -2256,31 +2217,7 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                                 {/* Action Buttons */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
                                     <button
-                                        onClick={() => {
-                                            const ewb = generatedEwb || {};
-                                            const invoice = generatedEwb?.invoice || selectedEwbInvoice || {};
-
-                                            // Create temporary element for PDF generation using reusable template
-                                            const element = document.createElement('div');
-                                            element.innerHTML = getEwayBillTemplate(ewb, invoice);
-                                            element.style.position = 'absolute';
-                                            element.style.top = '-10000px';
-                                            element.style.left = '-10000px';
-                                            element.style.background = 'white';
-                                            document.body.appendChild(element);
-
-                                            const opt = {
-                                                margin: 5,
-                                                filename: `EWayBill-${ewb.ewbNo || 'draft'}.pdf`,
-                                                image: { type: 'jpeg', quality: 0.98 },
-                                                html2canvas: { scale: 2 },
-                                                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-                                            };
-
-                                            html2pdf().set(opt).from(element).save().then(() => {
-                                                document.body.removeChild(element);
-                                            });
-                                        }}
+                                        onClick={downloadEwbPDF}
                                         className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-blue-600 text-blue-600 rounded-xl hover:bg-blue-50 transition-colors font-medium"
                                     >
                                         <HiOutlineDownload className="text-lg" />
@@ -2298,7 +2235,45 @@ const EInvoice = ({ defaultTab = 'sales' }) => {
                     </div>
                 )
             }
+
+            {/* QR Code Viewer Modal for History */}
+            {
+                showQRModal && selectedRecord && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 animate-fade-in text-center relative">
+                            <button
+                                onClick={() => setShowQRModal(false)}
+                                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+                            >
+                                <HiOutlineXCircle className="text-2xl" />
+                            </button>
+
+                            <h2 className="text-2xl font-bold text-gray-800 mb-6">Invoice QR Code</h2>
+
+                            <div className="bg-white p-4 rounded-xl border-4 border-gray-200 inline-block shadow-lg mb-6">
+                                {selectedRecord.qrcode ? (
+                                    <img
+                                        src={selectedRecord.qrcode}
+                                        alt="Invoice QR Code"
+                                        className="w-64 h-64"
+                                    />
+                                ) : (
+                                    <div className="w-64 h-64 bg-gray-100 flex items-center justify-center text-gray-400">
+                                        No QR Code
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="space-y-2 text-sm text-gray-600">
+                                <p><span className="font-semibold">Invoice:</span> {selectedRecord.invoice_number}</p>
+                                <p><span className="font-semibold">IRN:</span> <span className="font-mono text-xs">{selectedRecord.irn?.substring(0, 20)}...</span></p>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
         </div>
+
     );
 };
 

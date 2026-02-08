@@ -329,10 +329,10 @@ module.exports = function (authenticate) {
 
             if (insertError) {
                 console.error('Database insert error:', insertError);
-                // Still return success if IRN was generated
                 return res.json({
                     success: true,
-                    message: 'IRN generated (database save pending)',
+                    warning: true,
+                    message: 'DB Save Failed: ' + (insertError.message || 'Unknown Error'),
                     irn: irn,
                     qrcode: qrcode,
                     signedInvoice: signedInvoice
@@ -568,7 +568,7 @@ module.exports = function (authenticate) {
             // Build query - only get records with IRN but no EWB
             let query = supabase
                 .from('einvoice_records')
-                .select('id, invoice_number, invoice_date, supplier_name, supplier_gstin, recipient_name, recipient_gstin, total_amount, irn, ewb_no, ewb_status, status')
+                .select('id, invoice_number, invoice_date, supplier_name, supplier_gstin, supplier_address, recipient_name, recipient_gstin, recipient_address, total_amount, irn, signed_invoice, items, ewb_no, ewb_status, status')
                 .eq('status', 'generated')
                 .not('irn', 'is', null)
                 .order('created_at', { ascending: false });
