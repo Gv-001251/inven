@@ -2,6 +2,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const { v4: uuid } = require('uuid');
 const http = require('http');
@@ -19,8 +20,19 @@ const createGstRoutes = require('./routes/gst.routes');
 const createEinvoiceRoutes = require('./routes/einvoice.routes');
 
 const app = express();
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  message: { message: 'Too many requests, please try again later.' }
+});
+
 app.use(cors());
 app.use(express.json());
+app.use(limiter);
+
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/invoices', invoiceRoutes);
@@ -785,6 +797,7 @@ app.post('/api/employees', authenticate, requirePermission('manageRoles'), async
   }
 
   try {
+    // Step 1: Create auth user (Supabase Auth API — cannot be in a stored procedure)
     const { data: authUser, error } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -795,21 +808,25 @@ app.post('/api/employees', authenticate, requirePermission('manageRoles'), async
       return res.status(409).json({ message: 'Email already exists.' });
     }
 
-    await supabase.from('employees').insert({
-      id: authUser.user.id,
-      name,
-      role_id: roleId,
-      designation: designation || 'Associate',
-      department: department || 'Operations',
-      email
+    // Step 2: ACID-compliant — atomically insert employee record + welcome notification
+    const { error: rpcError } = await supabase.rpc('create_employee_with_notification', {
+      p_employee_id: authUser.user.id,
+      p_name: name,
+      p_role_id: roleId,
+      p_designation: designation || 'Associate',
+      p_department: department || 'Operations',
+      p_email: email,
+      p_role_name: role.name
     });
 
-    await createNotification({
-      title: 'New employee added',
-      message: `${name} joined as ${role.name}.`,
-      severity: 'success',
-      meta: { employeeId: authUser.user.id }
-    });
+    if (rpcError) {
+      console.error('Employee DB transaction failed:', rpcError);
+      // Clean up the auth user since DB insert failed
+      await supabase.auth.admin.deleteUser(authUser.user.id);
+      return res.status(500).json({ message: 'Failed to create employee record.' });
+    }
+
+    await broadcastNotifications();
 
     res.status(201).json({ employee: { id: authUser.user.id, name, role_id: roleId, designation, department, email } });
   } catch (err) {
@@ -887,10 +904,28 @@ app.post('/api/inventory/scan', authenticate, requirePermission('updateInventory
     return res.status(400).json({ message: 'Insufficient stock for OUT operation.' });
   }
 
-  await inventoryStore.updateItemStock(item.id, newStock);
+  const employee = await getEmployee(req.auth.employeeId);
+  const userName = employee ? employee.name : 'System';
+  const txReason = reason || (normalizedAction === 'IN' ? 'Stock replenishment' : 'Inventory consumption');
+
+  // ACID-compliant: Atomically update stock AND log transaction via stored procedure
+  try {
+    await inventoryStore.processLegacyInventoryScan({
+      itemId: item.id,
+      newStock: newStock,
+      itemName: item.name,
+      barcode: item.barcode,
+      action: normalizedAction,
+      quantity: qty,
+      user: userName,
+      reason: txReason
+    });
+  } catch (txError) {
+    return res.status(500).json({ message: 'Failed to complete transaction safely.', error: txError.message });
+  }
+
   item.stock = newStock;
 
-  const employee = await getEmployee(req.auth.employeeId);
   const transaction = {
     id: uuid(),
     itemId: item.id,
@@ -898,12 +933,10 @@ app.post('/api/inventory/scan', authenticate, requirePermission('updateInventory
     barcode: item.barcode,
     action: normalizedAction,
     quantity: qty,
-    user: employee ? employee.name : 'System',
-    reason: reason || (normalizedAction === 'IN' ? 'Stock replenishment' : 'Inventory consumption'),
+    user: userName,
+    reason: txReason,
     timestamp: new Date().toISOString()
   };
-
-  await inventoryStore.insertTransaction(transaction);
 
   const lowStockItems = await getLowStockItems();
   if (lowStockItems.some((lowItem) => lowItem.id === item.id)) {

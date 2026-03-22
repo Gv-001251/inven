@@ -126,7 +126,7 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
-// POST - Update stock (manufactured or dispatched)
+// POST - Update stock (manufactured or dispatched) — ACID-compliant via stored procedure
 router.post('/update-stock', authenticate, async (req, res) => {
   try {
     const { productId, action, quantity, reason, userName } = req.body;
@@ -172,34 +172,24 @@ router.post('/update-stock', authenticate, async (req, res) => {
       });
     }
     
-    // Update stock
-    const { error: updateError } = await supabase
-      .from('finished_products')
-      .update({ stock: newStock })
-      .eq('id', productId);
+    // ACID-compliant: Atomically update stock AND log transaction via stored procedure
+    console.log('💾 Processing atomic finished product stock transaction...');
+    const { error: rpcError } = await supabase.rpc('process_finished_product_stock', {
+      p_product_id: productId,
+      p_new_stock: newStock,
+      p_product_name: product.product_name,
+      p_action: action,
+      p_quantity: parseInt(quantity),
+      p_reason: reason || '',
+      p_user_name: userName || 'System'
+    });
     
-    if (updateError) {
-      console.error('❌ Update error:', updateError);
-      throw updateError;
+    if (rpcError) {
+      console.error('❌ Atomic transaction failed:', rpcError);
+      throw rpcError;
     }
     
-    // Log transaction
-    const { error: logError } = await supabase
-      .from('finished_product_transactions')
-      .insert({
-        product_id: productId,
-        product_name: product.product_name,
-        action: action,
-        quantity: parseInt(quantity),
-        reason: reason || '',
-        user_name: userName || 'System'
-      });
-    
-    if (logError) {
-      console.error('❌ Transaction log error:', logError);
-    }
-    
-    console.log('✅ Stock updated successfully. New stock:', newStock);
+    console.log('✅ Atomic transaction completed. New stock:', newStock);
     
     res.json({
       success: true,

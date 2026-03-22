@@ -357,8 +357,8 @@ const Invoice = () => {
   const downloadPDF = (billNumber) => {
     // For direct links, we can use the base URL from the api config logic or hardcode relative if proxy setup, 
     // but here we are fixing the port mismatch so direct localhost:5000 is safer than 5001
-    // Ideally we should export BASE_URL from axios.js but for now hardcoding 5000 is better than 5001.
-    window.open(`http://localhost:5000/api/invoices/download/${billNumber}`, '_blank');
+    // Ideally we should export BASE_URL from axios.js but for now hardcoding 5001 is better.
+    window.open(`http://localhost:5001/api/invoices/download/${billNumber}`, '_blank');
   };
 
   return (

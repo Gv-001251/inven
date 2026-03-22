@@ -17,24 +17,16 @@ router.get('/products', async (req, res) => {
   }
 })
 
-// Add product
+// Add product (ACID-compliant via stored procedure)
 router.post('/products', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('products')
-      .insert(req.body)
-      .select()
-      .single()
+    const { data: result, error } = await supabase.rpc('create_product_with_inventory', {
+      p_product_data: req.body
+    })
     
     if (error) throw error
     
-    // Create inventory record
-    await supabase.from('inventory').insert({
-      product_id: data.id,
-      quantity: 0
-    })
-    
-    res.status(201).json(data)
+    res.status(201).json(result)
   } catch (error) {
     res.status(500).json({ error: error.message })
   }

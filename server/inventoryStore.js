@@ -110,6 +110,42 @@ async function getTransactionsFromDate(dateString) {
   return data || [];
 }
 
+// ACID-compliant transaction wrappers using PostgreSQL stored procedures
+
+async function processInventoryScan(params) {
+  const { error } = await supabase.rpc('process_inventory_scan', {
+    p_item_id: params.itemId,
+    p_new_stock: params.newStock,
+    p_item_name: params.itemName,
+    p_barcode: params.barcode,
+    p_action: params.action,
+    p_quantity: params.quantity,
+    p_reason: params.reason,
+    p_user_name: params.user || 'Admin'
+  });
+
+  if (error) {
+    throw new Error('Inventory scan transaction failed: ' + error.message);
+  }
+}
+
+async function processLegacyInventoryScan(params) {
+  const { error } = await supabase.rpc('process_legacy_inventory_scan', {
+    p_item_id: params.itemId,
+    p_new_stock: params.newStock,
+    p_item_name: params.itemName,
+    p_barcode: params.barcode,
+    p_action: params.action,
+    p_quantity: params.quantity,
+    p_user_name: params.user,
+    p_reason: params.reason
+  });
+
+  if (error) {
+    throw new Error('Legacy inventory scan transaction failed: ' + error.message);
+  }
+}
+
 module.exports = {
   seedInventoryItems,
   getAllItems,
@@ -120,5 +156,7 @@ module.exports = {
   updateItemThreshold,
   insertTransaction,
   getTransactions,
-  getTransactionsFromDate
+  getTransactionsFromDate,
+  processInventoryScan,
+  processLegacyInventoryScan
 };

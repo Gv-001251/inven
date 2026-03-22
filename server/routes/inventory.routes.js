@@ -77,7 +77,7 @@ router.get('/lookup/:query', async (req, res) => {
   }
 });
 
-// Stock in/out
+// Stock in/out (ACID-compliant via stored procedure)
 router.post('/scan', async (req, res) => {
   try {
     const { barcode, action, quantity, reason } = req.body;
@@ -122,50 +122,25 @@ router.post('/scan', async (req, res) => {
       });
     }
     
-    // Update stock
-    console.log('💾 Updating stock...');
-    const { error: updateError } = await supabase
-      .from('items')
-      .update({ stock: newStock })
-      .eq('id', item.id);
+    // ACID-compliant: Atomically update stock AND log transaction via stored procedure
+    console.log('💾 Processing atomic inventory scan transaction...');
+    const { error: rpcError } = await supabase.rpc('process_inventory_scan', {
+      p_item_id: item.id,
+      p_new_stock: newStock,
+      p_item_name: item.name,
+      p_barcode: item.barcode || barcode,
+      p_action: action,
+      p_quantity: quantity,
+      p_reason: reason || 'No reason provided',
+      p_user_name: 'Admin'
+    });
     
-    if (updateError) {
-      console.error('❌ Stock update failed:', updateError);
-      throw updateError;
+    if (rpcError) {
+      console.error('❌ Atomic transaction failed:', rpcError);
+      throw rpcError;
     }
     
-    console.log('✅ Stock updated successfully');
-    
-    // Log transaction
-    console.log('📝 Inserting transaction...');
-    const transactionData = {
-      item_id: item.id,
-      item_name: item.name,
-      action: action,
-      quantity: quantity,
-      reason: reason || 'No reason provided',
-      user: 'Admin',
-      timestamp: new Date().toISOString()
-    };
-    
-    console.log('Transaction data:', JSON.stringify(transactionData, null, 2));
-    
-    const { data: insertedTx, error: txError } = await supabase
-      .from('transactions')
-      .insert(transactionData)
-      .select()
-      .single();
-    
-    if (txError) {
-      console.error('❌ Transaction insert failed:', txError);
-      console.error('Error details:', JSON.stringify(txError, null, 2));
-      // Don't fail the request, just warn
-      console.warn('⚠️ Stock updated but transaction not logged');
-    } else {
-      console.log('✅ Transaction logged successfully');
-      console.log('Inserted transaction:', JSON.stringify(insertedTx, null, 2));
-    }
-    
+    console.log('✅ Atomic transaction completed successfully (stock + log)');
     console.log('📦 === SCAN REQUEST END ===\n');
     
     res.json({
@@ -228,23 +203,16 @@ router.get('/products', async (req, res) => {
   }
 });
 
-// Add product
+// Add product (ACID-compliant via stored procedure)
 router.post('/products', async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from('products')
-      .insert(req.body)
-      .select()
-      .single();
+    const { data: result, error } = await supabase.rpc('create_product_with_inventory', {
+      p_product_data: req.body
+    });
     
     if (error) throw error;
     
-    await supabase.from('inventory').insert({
-      product_id: data.id,
-      quantity: 0
-    });
-    
-    res.status(201).json(data);
+    res.status(201).json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
